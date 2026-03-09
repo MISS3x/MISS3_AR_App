@@ -22,7 +22,6 @@ interface Company {
   id: string;
   display_name: string | null;
   company_name: string | null;
-  tier: string;
   model_count: number;
 }
 
@@ -62,7 +61,7 @@ export default function CompanySelectScreen({ navigation }: CompanySelectScreenP
       // Fetch user profiles for these owners
       const { data: usersData, error: usersError } = await supabase
         .from('users')
-        .select('id, display_name, company_name, tier')
+        .select('id, display_name, company_name')
         .in('id', Array.from(ownerCounts.keys()));
 
       if (usersError) throw usersError;
@@ -71,7 +70,6 @@ export default function CompanySelectScreen({ navigation }: CompanySelectScreenP
         id: u.id,
         display_name: u.display_name,
         company_name: u.company_name,
-        tier: u.tier,
         model_count: ownerCounts.get(u.id) || 0,
       }));
 

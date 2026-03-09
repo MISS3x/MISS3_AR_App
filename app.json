@@ -17,7 +17,8 @@
       "bundleIdentifier": "cz.miss3.ar",
       "infoPlist": {
         "NSCameraUsageDescription": "MISS3 AR needs camera access for augmented reality features",
-        "NSPhotoLibraryUsageDescription": "MISS3 AR needs photo library access to save AR screenshots"
+        "NSPhotoLibraryUsageDescription": "MISS3 AR needs photo library access to save AR screenshots",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -37,7 +38,7 @@
     },
     "extra": {
       "eas": {
-        "projectId": ""
+        "projectId": "d430025a-3859-42f7-9b32-840f6a2e5a42"
       }
     },
     "plugins": [

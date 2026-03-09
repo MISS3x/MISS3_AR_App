@@ -1,6 +1,6 @@
 // ============================================================
-// App Navigator — Direct to model catalog (no auth required)
-// White-label viewer: company is configured via env variable
+// App Navigator — Universal app flow
+// CompanySelect → ModelList → ModelDetail
 // ============================================================
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
@@ -8,11 +8,13 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { colors } from '../theme/theme';
 
 // Screens
+import CompanySelectScreen from '../screens/CompanySelectScreen';
 import ModelListScreen from '../screens/ModelListScreen';
 import ModelDetailScreen from '../screens/ModelDetailScreen';
 
 export type RootStackParamList = {
-  ModelList: undefined;
+  CompanySelect: undefined;
+  ModelList: { companyId: string; companyName: string };
   ModelDetail: { model: any };
 };
 
@@ -40,12 +42,14 @@ export default function AppNavigator() {
       }}
     >
       <Stack.Navigator
+        initialRouteName="CompanySelect"
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: colors.background },
           animation: 'slide_from_right',
         }}
       >
+        <Stack.Screen name="CompanySelect" component={CompanySelectScreen} />
         <Stack.Screen name="ModelList" component={ModelListScreen} />
         <Stack.Screen name="ModelDetail" component={ModelDetailScreen} />
       </Stack.Navigator>

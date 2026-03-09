@@ -1,6 +1,6 @@
 // ============================================================
-// Model List Screen — White-label catalog for a specific company
-// Loads models by COMPANY_ID from env (no auth required)
+// Model List Screen — Catalog for a selected company
+// Receives companyId and companyName from navigation params
 // ============================================================
 import React, { useEffect, useState, useCallback } from 'react';
 import {
@@ -10,20 +10,22 @@ import {
   StyleSheet,
   ActivityIndicator,
   RefreshControl,
+  TouchableOpacity,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, spacing, typography, borderRadius } from '../theme/theme';
 import { supabase } from '../lib/supabase';
-import { companyConfig } from '../lib/company-config';
-import type { Model3D, Category, UserProfile } from '../types/database';
+import type { Model3D, Category } from '../types/database';
 import CategoryBar from '../components/CategoryBar';
 import ModelCard from '../components/ModelCard';
 
 interface ModelListScreenProps {
+  route: { params: { companyId: string; companyName: string } };
   navigation: any;
 }
 
-export default function ModelListScreen({ navigation }: ModelListScreenProps) {
+export default function ModelListScreen({ route, navigation }: ModelListScreenProps) {
+  const { companyId, companyName } = route.params;
   const insets = useSafeAreaInsets();
   const [models, setModels] = useState<Model3D[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -31,27 +33,9 @@ export default function ModelListScreen({ navigation }: ModelListScreenProps) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [companyProfile, setCompanyProfile] = useState<UserProfile | null>(null);
-
-  const companyId = companyConfig.companyId;
-
-  // Fetch company profile (for branding: name, logo, etc.)
-  const fetchCompanyProfile = useCallback(async () => {
-    if (!companyId) return;
-
-    const { data } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', companyId)
-      .single();
-
-    if (data) setCompanyProfile(data as UserProfile);
-  }, [companyId]);
 
   // Fetch categories for the company
   const fetchCategories = useCallback(async () => {
-    if (!companyId) return;
-
     const { data } = await supabase
       .from('categories')
       .select('*')
@@ -63,11 +47,6 @@ export default function ModelListScreen({ navigation }: ModelListScreenProps) {
 
   // Fetch models (optionally filtered by category)
   const fetchModels = useCallback(async (categoryId: string | null = null) => {
-    if (!companyId) {
-      setError('Company not configured. Contact support.');
-      return;
-    }
-
     let query = supabase
       .from('models_3d')
       .select('*')
@@ -93,7 +72,7 @@ export default function ModelListScreen({ navigation }: ModelListScreenProps) {
   useEffect(() => {
     const loadAll = async () => {
       setLoading(true);
-      await Promise.all([fetchCompanyProfile(), fetchCategories(), fetchModels()]);
+      await Promise.all([fetchCategories(), fetchModels()]);
       setLoading(false);
     };
     loadAll();
@@ -121,14 +100,18 @@ export default function ModelListScreen({ navigation }: ModelListScreenProps) {
     />
   );
 
-  const companyName = companyProfile?.company_name || companyProfile?.display_name || 'AR Catalog';
-
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       {/* Header */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.companyName}>{companyName}</Text>
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
+          style={styles.backButton}
+        >
+          <Text style={styles.backIcon}>←</Text>
+        </TouchableOpacity>
+        <View style={styles.headerText}>
+          <Text style={styles.companyName} numberOfLines={1}>{companyName}</Text>
           <Text style={styles.subtitle}>Product Catalog</Text>
         </View>
         <View style={styles.badge}>
@@ -163,7 +146,7 @@ export default function ModelListScreen({ navigation }: ModelListScreenProps) {
           <Text style={styles.emptyIcon}>📦</Text>
           <Text style={styles.stateTitle}>No products yet</Text>
           <Text style={styles.stateText}>
-            Products will appear here once they are added to the catalog
+            Products will appear here once added via the web portal
           </Text>
         </View>
       ) : (
@@ -196,22 +179,39 @@ const styles = StyleSheet.create({
   },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: spacing.md,
     paddingTop: spacing.md,
     paddingBottom: spacing.sm,
+    gap: spacing.sm,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.surfaceElevated,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  backIcon: {
+    fontSize: 18,
+    color: colors.textPrimary,
+  },
+  headerText: {
+    flex: 1,
   },
   companyName: {
     fontFamily: typography.fontFamily.headingBold,
-    fontSize: typography.fontSize.xxl,
+    fontSize: typography.fontSize.xl,
     color: colors.textPrimary,
   },
   subtitle: {
     fontFamily: typography.fontFamily.regular,
-    fontSize: typography.fontSize.sm,
+    fontSize: typography.fontSize.xs,
     color: colors.textSecondary,
-    marginTop: 2,
+    marginTop: 1,
   },
   badge: {
     paddingHorizontal: spacing.md,

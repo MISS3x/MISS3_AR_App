@@ -49,7 +49,7 @@ function getModuleConfig(): ModuleConfig {
 
   if (!modulesEnv) return DEFAULT_CONFIG;
 
-  const enabledModules = modulesEnv.split(',').map((m) => m.trim());
+  const enabledModules = modulesEnv.split(',').map((m: string) => m.trim());
   const config = { ...DEFAULT_CONFIG };
 
   for (const mod of enabledModules) {

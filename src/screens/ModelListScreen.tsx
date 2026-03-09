@@ -37,9 +37,9 @@ export default function ModelListScreen({ route, navigation }: ModelListScreenPr
   // Fetch categories for the company
   const fetchCategories = useCallback(async () => {
     const { data } = await supabase
-      .from('categories')
+      .from('model_categories')
       .select('*')
-      .eq('user_id', companyId)
+      .eq('owner_id', companyId)
       .order('name');
 
     if (data) setCategories(data as Category[]);

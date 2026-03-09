@@ -55,7 +55,8 @@ export interface Model3D {
 export interface Category {
   id: string;
   name: string;
-  user_id: string;
+  owner_id: string;
+  created_at?: string;
 }
 
 export type AccountType = 'individual' | 'company';

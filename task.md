@@ -47,11 +47,11 @@
 - [ ] **#14** — Overall layout polish (spacing, animations, company select card)
 
 ## ARKit Module (native — Phase 2)
-- [ ] **#15** — Research: ViroReact vs custom Swift ARKit module vs expo-three
-- [ ] **#16** — Plane detection (floor + wall detection)
-- [ ] **#17** — Single model AR placement (place, rotate, scale with gestures)
-- [ ] **#18** — Multiple models in one AR scene
-- [ ] **#19** — Custom AR UI overlay (toolbar, model picker, delete button)
+- [x] **#15** — Research & Download logic: ViroReact locally caches Supabase models ✅
+- [x] **#16** — AR Interactions: Drag, Scale (pinch), Rotate (twist) gestures ✅
+- [ ] **#17** — Advanced Placement: Detect wall/floor normals and align model appropriately
+- [ ] **#18** — Graphics Polish: Soft Shadows & Ambient Light Estimation
+- [ ] **#19** — Dev UI: Add floating menu to toggle "Clay mode" (gray material) for light testing
 - [ ] **#20** — AR annotations / dimension lines
 - [ ] **#21** — AR screenshot / recording
 - [ ] **#22** — QR target tracking (place model on QR code)

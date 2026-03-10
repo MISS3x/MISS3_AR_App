@@ -24,6 +24,13 @@ interface Company {
   display_name: string | null;
   company_name: string | null;
   model_count: number;
+  thumbnail_path: string | null;
+}
+
+function getThumbnailUrl(thumbnailPath: string | null): string | null {
+  if (!thumbnailPath) return null;
+  const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+  return `${supabaseUrl}/storage/v1/object/public/model_thumbnails/${thumbnailPath}`;
 }
 
 interface CompanySelectScreenProps {
@@ -42,15 +49,20 @@ export default function CompanySelectScreen({ navigation }: CompanySelectScreenP
       // Fetch all users who have at least one active model
       const { data: modelsData, error: modelsError } = await supabase
         .from('models_3d')
-        .select('owner_id')
+        .select('owner_id, thumbnail_path')
         .eq('is_active', true);
 
       if (modelsError) throw modelsError;
 
-      // Get unique owner IDs and count models per owner
+      // Get unique owner IDs, count models per owner, and save the first thumbnail
       const ownerCounts = new Map<string, number>();
+      const ownerThumbnails = new Map<string, string | null>();
+      
       for (const m of modelsData || []) {
         ownerCounts.set(m.owner_id, (ownerCounts.get(m.owner_id) || 0) + 1);
+        if (m.thumbnail_path && !ownerThumbnails.has(m.owner_id)) {
+          ownerThumbnails.set(m.owner_id, m.thumbnail_path);
+        }
       }
 
       if (ownerCounts.size === 0) {
@@ -72,6 +84,7 @@ export default function CompanySelectScreen({ navigation }: CompanySelectScreenP
         display_name: u.display_name,
         company_name: u.company_name,
         model_count: ownerCounts.get(u.id) || 0,
+        thumbnail_path: ownerThumbnails.get(u.id) || null,
       }));
 
       // Sort by model count descending
@@ -107,17 +120,7 @@ export default function CompanySelectScreen({ navigation }: CompanySelectScreenP
   };
 
   const renderCompany = ({ item, index }: { item: Company; index: number }) => {
-    // Generate a color based on company name for the avatar
-    const hue = (item.company_name || item.display_name || '')
-      .split('')
-      .reduce((acc, c) => acc + c.charCodeAt(0), 0) % 360;
-    const avatarColor = `hsl(${hue}, 60%, 45%)`;
-    const initials = (item.company_name || item.display_name || '?')
-      .split(' ')
-      .map((w) => w[0])
-      .join('')
-      .substring(0, 2)
-      .toUpperCase();
+    const thumbnailUrl = getThumbnailUrl(item.thumbnail_path);
 
     return (
       <TouchableOpacity
@@ -129,9 +132,20 @@ export default function CompanySelectScreen({ navigation }: CompanySelectScreenP
           colors={[colors.surfaceElevated, colors.surface]}
           style={styles.cardGradient}
         >
-          {/* Avatar */}
-          <View style={[styles.avatar, { backgroundColor: avatarColor }]}>
-            <Text style={styles.avatarText}>{initials}</Text>
+          {/* Thumbnail */}
+          <View style={styles.thumbnailContainer}>
+            {thumbnailUrl ? (
+               <Image
+                 source={{ uri: thumbnailUrl }}
+                 style={styles.thumbnailImage}
+                 contentFit="cover"
+                 transition={200}
+               />
+            ) : (
+               <View style={styles.thumbnailPlaceholder}>
+                  <Text style={styles.thumbnailPlaceholderIcon}>📦</Text>
+               </View>
+            )}
           </View>
 
           {/* Info */}
@@ -157,6 +171,7 @@ export default function CompanySelectScreen({ navigation }: CompanySelectScreenP
       <View style={styles.header}>
         <Text style={styles.logo}>MISS3</Text>
         <Text style={styles.logoSub}>AR</Text>
+        <Text style={{ fontFamily: typography.fontFamily.medium, fontSize: 12, color: 'rgba(255,255,255,0.4)', marginLeft: 8 }}>[v1.6]</Text>
       </View>
       <View style={styles.headerDivider} />
       <Text style={styles.headerTitle}>Select a Company</Text>
@@ -209,7 +224,9 @@ export default function CompanySelectScreen({ navigation }: CompanySelectScreenP
           data={companies}
           renderItem={renderCompany}
           keyExtractor={(item) => item.id}
+          numColumns={3}
           contentContainerStyle={styles.list}
+          columnWrapperStyle={styles.row}
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl
@@ -277,53 +294,66 @@ const styles = StyleSheet.create({
   list: {
     paddingHorizontal: spacing.md,
     paddingBottom: spacing.xxl,
-    gap: spacing.sm,
+    gap: spacing.md,
+  },
+  row: {
+    justifyContent: 'space-between',
+    gap: spacing.md,
   },
   companyCard: {
+    flex: 1,
     borderRadius: borderRadius.lg,
     overflow: 'hidden',
     ...shadows.md,
+    marginBottom: spacing.md,
   },
   cardGradient: {
-    flexDirection: 'row',
     alignItems: 'center',
-    padding: spacing.md,
     borderRadius: borderRadius.lg,
     borderWidth: 1,
     borderColor: colors.border,
+    minHeight: 130,
+    justifyContent: 'flex-start',
+    overflow: 'hidden',
   },
-  avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: borderRadius.md,
+  thumbnailContainer: {
+    width: '100%',
+    aspectRatio: 1, // 1:1 square
+    backgroundColor: colors.surfaceBright,
+  },
+  thumbnailImage: {
+    width: '100%',
+    height: '100%',
+  },
+  thumbnailPlaceholder: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarText: {
-    fontFamily: typography.fontFamily.bold,
-    fontSize: typography.fontSize.lg,
-    color: '#FFFFFF',
+  thumbnailPlaceholderIcon: {
+    fontSize: 24,
+    opacity: 0.5,
   },
   cardInfo: {
-    flex: 1,
-    marginLeft: spacing.md,
+    alignItems: 'center',
+    padding: spacing.xs + 2,
+    width: '100%',
   },
   companyName: {
     fontFamily: typography.fontFamily.semiBold,
-    fontSize: typography.fontSize.lg,
+    fontSize: typography.fontSize.sm,
     color: colors.textPrimary,
+    textAlign: 'center',
+    marginBottom: 2,
   },
   modelCount: {
     fontFamily: typography.fontFamily.regular,
-    fontSize: typography.fontSize.sm,
+    fontSize: 10,
     color: colors.textSecondary,
-    marginTop: 2,
+    textAlign: 'center',
   },
   arrow: {
-    fontFamily: typography.fontFamily.regular,
-    fontSize: typography.fontSize.xl,
-    color: colors.textTertiary,
-    marginLeft: spacing.sm,
+    display: 'none',
   },
   // States
   centeredState: {

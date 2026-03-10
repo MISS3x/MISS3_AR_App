@@ -61,7 +61,9 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
         {/* Header */}
         <View style={styles.header}>
           <Text style={styles.logo}>MISS3</Text>
-          <Text style={styles.subtitle}>AR Tools</Text>
+          <Text style={styles.subtitle}>
+            AR Tools <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', letterSpacing: 0 }}>[v1.4]</Text>
+          </Text>
           <View style={styles.divider} />
           <Text style={styles.tagline}>3D & AR for your business</Text>
         </View>

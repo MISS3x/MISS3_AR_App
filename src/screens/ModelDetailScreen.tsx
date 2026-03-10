@@ -180,6 +180,7 @@ export default function ModelDetailScreen({ route, navigation }: ModelDetailScre
               navigation.navigate('ARViewer', {
                 modelUrl: data.signedUrl,
                 modelTitle: model.title,
+                modelTransform: model.model_transform,
               });
             } catch (err) {
               console.error('Error loading model:', err);

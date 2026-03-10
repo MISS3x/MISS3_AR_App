@@ -111,7 +111,9 @@ export default function ModelListScreen({ route, navigation }: ModelListScreenPr
           <Text style={styles.backIcon}>←</Text>
         </TouchableOpacity>
         <View style={styles.headerText}>
-          <Text style={styles.companyName} numberOfLines={1}>{companyName}</Text>
+          <Text style={styles.companyName} numberOfLines={1}>
+            {companyName} <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', fontWeight: 'normal' }}>[v1.4]</Text>
+          </Text>
           <Text style={styles.subtitle}>Product Catalog</Text>
         </View>
         <View style={styles.badge}>

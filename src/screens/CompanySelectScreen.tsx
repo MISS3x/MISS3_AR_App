@@ -154,7 +154,7 @@ export default function CompanySelectScreen({ navigation }: CompanySelectScreenP
               {item.company_name || item.display_name || 'Unknown'}
             </Text>
             <Text style={styles.modelCount}>
-              {item.model_count} {item.model_count === 1 ? 'model' : 'models'}
+              {item.model_count} {item.model_count === 1 ? 'MODEL' : 'MODELS'}
             </Text>
           </View>
 
@@ -311,15 +311,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderRadius: borderRadius.lg,
     borderWidth: 1,
-    borderColor: colors.border,
-    minHeight: 130,
+    borderColor: 'rgba(255,255,255,0.08)',
+    minHeight: 140,
     justifyContent: 'flex-start',
     overflow: 'hidden',
   },
   thumbnailContainer: {
     width: '100%',
     aspectRatio: 1, // 1:1 square
-    backgroundColor: colors.surfaceBright,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
   },
   thumbnailImage: {
     width: '100%',
@@ -336,21 +338,24 @@ const styles = StyleSheet.create({
   },
   cardInfo: {
     alignItems: 'center',
-    padding: spacing.xs + 2,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.xs,
     width: '100%',
+    backgroundColor: 'rgba(0,0,0,0.2)', // Slight darkening for the text area
   },
   companyName: {
     fontFamily: typography.fontFamily.semiBold,
     fontSize: typography.fontSize.sm,
     color: colors.textPrimary,
     textAlign: 'center',
-    marginBottom: 2,
+    marginBottom: 4,
   },
   modelCount: {
-    fontFamily: typography.fontFamily.regular,
-    fontSize: 10,
-    color: colors.textSecondary,
+    fontFamily: typography.fontFamily.bold,
+    fontSize: 9,
+    color: colors.textTertiary,
     textAlign: 'center',
+    letterSpacing: 1,
   },
   arrow: {
     display: 'none',

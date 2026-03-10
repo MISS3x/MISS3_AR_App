@@ -112,7 +112,7 @@ export default function ModelListScreen({ route, navigation }: ModelListScreenPr
         </TouchableOpacity>
         <View style={styles.headerText}>
           <Text style={styles.companyName} numberOfLines={1}>
-            {companyName} <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', fontWeight: 'normal' }}>[v1.4]</Text>
+            {companyName}
           </Text>
           <Text style={styles.subtitle}>Product Catalog</Text>
         </View>
@@ -234,7 +234,8 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xxl,
   },
   row: {
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
+    marginHorizontal: -spacing.sm / 2, // offset the card margins
   },
   // States
   centeredState: {

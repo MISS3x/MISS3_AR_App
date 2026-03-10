@@ -14,14 +14,18 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { colors, spacing, borderRadius, typography, shadows } from '../theme/theme';
 import type { Model3D } from '../types/database';
 
-const SCREEN_WIDTH = Dimensions.get('window').width;
 const CARD_GAP = spacing.sm;
-const CARD_PADDING = spacing.md;
-const CARD_WIDTH = (SCREEN_WIDTH - CARD_PADDING * 2 - CARD_GAP) / 2;
 
 interface ModelCardProps {
   model: Model3D;
   onPress: () => void;
+}
+
+function formatFileSize(bytes: number | undefined): string | null {
+  if (!bytes) return null;
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 // Build thumbnail URL from Supabase public bucket
@@ -29,6 +33,16 @@ function getThumbnailUrl(thumbnailPath: string | null): string | null {
   if (!thumbnailPath) return null;
   const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
   return `${supabaseUrl}/storage/v1/object/public/model_thumbnails/${thumbnailPath}`;
+}
+
+function formatModelTitle(title: string): string {
+  // Remove file extensions
+  let cleanTitle = title.replace(/\.[^/.]+$/, '');
+  // Replace underscores and dashes with spaces
+  cleanTitle = cleanTitle.replace(/[_-]/g, ' ');
+  // Optional: Capitalize first letters
+  cleanTitle = cleanTitle.replace(/\b\w/g, (char) => char.toUpperCase());
+  return cleanTitle;
 }
 
 export default function ModelCard({ model, onPress }: ModelCardProps) {
@@ -61,10 +75,17 @@ export default function ModelCard({ model, onPress }: ModelCardProps) {
           style={styles.gradient}
         />
 
+        {/* File Size Badge */}
+        {model.metadata?.file_size && (
+          <View style={styles.sizeBadge}>
+            <Text style={styles.sizeBadgeText}>{formatFileSize(model.metadata.file_size)}</Text>
+          </View>
+        )}
+
         {/* Title overlay */}
         <View style={styles.titleContainer}>
           <Text style={styles.title} numberOfLines={2}>
-            {model.title}
+            {formatModelTitle(model.title)}
           </Text>
         </View>
       </View>
@@ -74,7 +95,8 @@ export default function ModelCard({ model, onPress }: ModelCardProps) {
 
 const styles = StyleSheet.create({
   container: {
-    width: CARD_WIDTH,
+    flex: 1,
+    marginHorizontal: CARD_GAP / 2,
     marginBottom: CARD_GAP,
     borderRadius: borderRadius.lg,
     overflow: 'hidden',
@@ -114,6 +136,20 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     padding: spacing.sm,
+  },
+  sizeBadge: {
+    position: 'absolute',
+    top: spacing.xs,
+    right: spacing.xs,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: borderRadius.sm,
+  },
+  sizeBadgeText: {
+    fontFamily: typography.fontFamily.medium,
+    fontSize: 10,
+    color: '#FFF',
   },
   title: {
     fontFamily: typography.fontFamily.semiBold,

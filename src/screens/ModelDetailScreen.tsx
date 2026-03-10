@@ -45,6 +45,16 @@ function formatDate(dateStr: string): string {
   });
 }
 
+function formatModelTitle(title: string): string {
+  // Remove file extensions
+  let cleanTitle = title.replace(/\.[^/.]+$/, '');
+  // Replace underscores and dashes with spaces
+  cleanTitle = cleanTitle.replace(/[_-]/g, ' ');
+  // Optional: Capitalize first letters
+  cleanTitle = cleanTitle.replace(/\b\w/g, (char) => char.toUpperCase());
+  return cleanTitle;
+}
+
 export default function ModelDetailScreen({ route, navigation }: ModelDetailScreenProps) {
   const { model } = route.params;
   const insets = useSafeAreaInsets();
@@ -98,7 +108,7 @@ export default function ModelDetailScreen({ route, navigation }: ModelDetailScre
 
         {/* Content */}
         <View style={styles.content}>
-          <Text style={styles.title}>{model.title}</Text>
+          <Text style={styles.title}>{formatModelTitle(model.title)}</Text>
 
           {model.description && (
             <Text style={styles.description}>{model.description}</Text>

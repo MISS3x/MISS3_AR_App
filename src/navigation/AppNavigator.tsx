@@ -11,7 +11,7 @@ import { colors } from '../theme/theme';
 import CompanySelectScreen from '../screens/CompanySelectScreen';
 import ModelListScreen from '../screens/ModelListScreen';
 import ModelDetailScreen from '../screens/ModelDetailScreen';
-import ARViewerScreen from '../screens/ARViewerScreen';
+import ARViewerScreen from '../screens/ARViewerScreenWrapper';
 
 export type RootStackParamList = {
   CompanySelect: undefined;

@@ -41,10 +41,10 @@
 - [x] **#10** — Download to cache + expo-sharing → Quick Look with AR ✅
 
 ## UI/UX Polish
-- [ ] **#11** — Clean model names (remove underscores, extensions)
-- [ ] **#12** — Fix settings icon overlap with model count badge
-- [ ] **#13** — Add file size display from DB
-- [ ] **#14** — Overall layout polish (spacing, animations, company select card)
+- [x] **#11** — Clean model names (remove underscores, extensions) ✅
+- [x] **#12** — Fix settings icon overlap with model count badge ✅ (Settings icon removed)
+- [x] **#13** — Add file size display from DB ✅
+- [x] **#14** — Overall layout polish (spacing, animations, company select card) ✅
 
 ## ARKit Module (native — Phase 2)
 - [x] **#15** — Research & Download logic: ViroReact locally caches Supabase models ✅

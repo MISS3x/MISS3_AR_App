@@ -50,8 +50,8 @@
 - [x] **#15** — Research & Download logic: ViroReact locally caches Supabase models ✅
 - [x] **#16** — AR Interactions: Drag, Scale (pinch), Rotate (twist) gestures ✅
 - [x] **#17** — Advanced Placement: Detect wall/floor normals and align model appropriately ✅ (Using `ViroARPlaneSelector` + `FixedToWorld` drag mapping)
-- [ ] **#18** — Graphics Polish: Soft Shadows & Ambient Light Estimation
-- [ ] **#19** — Dev UI: Add floating menu to toggle "Clay mode" (gray material) for light testing
+- [x] **#18** — Graphics Polish: Soft Shadows & Ambient Light Estimation ✅
+- [x] **#19** — Dev UI: Add floating menu to toggle "Clay mode" (gray material) for light testing ✅
 - [ ] **#20** — AR annotations / dimension lines
 - [ ] **#21** — AR screenshot / recording
 - [ ] **#22** — QR target tracking (place model on QR code)

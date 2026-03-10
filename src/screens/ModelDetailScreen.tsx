@@ -15,6 +15,7 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, spacing, borderRadius, typography, shadows } from '../theme/theme';
+import { supabase } from '../lib/supabase';
 import type { Model3D } from '../types/database';
 
 interface ModelDetailScreenProps {
@@ -160,15 +161,38 @@ export default function ModelDetailScreen({ route, navigation }: ModelDetailScre
           </TouchableOpacity>
         )}
 
-        <TouchableOpacity activeOpacity={0.8} style={styles.arButtonWrapper}>
+        <TouchableOpacity
+          activeOpacity={0.8}
+          style={styles.arButtonWrapper}
+          onPress={async () => {
+            try {
+              // Generate signed URL for the model file (models_secure bucket)
+              const { data, error } = await supabase
+                .storage
+                .from('models_secure')
+                .createSignedUrl(model.storage_path, 3600); // 1 hour
+              
+              if (error || !data?.signedUrl) {
+                console.error('Failed to get model URL:', error);
+                return;
+              }
+
+              navigation.navigate('ARViewer', {
+                modelUrl: data.signedUrl,
+                modelTitle: model.title,
+              });
+            } catch (err) {
+              console.error('Error loading model:', err);
+            }
+          }}
+        >
           <LinearGradient
             colors={colors.gradientPrimary}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
             style={styles.arButton}
           >
-            <Text style={styles.arButtonText}>View in AR</Text>
-            <Text style={styles.arButtonSub}>Coming soon</Text>
+            <Text style={styles.arButtonText}>View in 3D / AR</Text>
           </LinearGradient>
         </TouchableOpacity>
       </View>
@@ -354,7 +378,7 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.md,
     alignItems: 'center',
     justifyContent: 'center',
-    opacity: 0.6,
+    opacity: 1,
   },
   arButtonText: {
     fontFamily: typography.fontFamily.semiBold,

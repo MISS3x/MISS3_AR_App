@@ -11,6 +11,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   RefreshControl,
+  ScrollView,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -165,26 +166,44 @@ export default function CompanySelectScreen({ navigation }: CompanySelectScreenP
 
       {/* Content */}
       {loading ? (
-        <View style={styles.centeredState}>
+        <ScrollView
+          contentContainerStyle={styles.centeredState}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
+          }
+        >
           <ActivityIndicator size="large" color={colors.primary} />
           <Text style={styles.stateText}>Loading companies...</Text>
-        </View>
+        </ScrollView>
       ) : error ? (
-        <View style={styles.centeredState}>
+        <ScrollView
+          contentContainerStyle={styles.centeredState}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
+          }
+        >
           <Text style={styles.errorIcon}>⚠️</Text>
           <Text style={styles.stateText}>{error}</Text>
           <TouchableOpacity onPress={fetchCompanies}>
             <Text style={styles.retryText}>Tap to retry</Text>
           </TouchableOpacity>
-        </View>
+        </ScrollView>
       ) : companies.length === 0 ? (
-        <View style={styles.centeredState}>
+        <ScrollView
+          contentContainerStyle={styles.centeredState}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
+          }
+        >
           <Text style={styles.emptyIcon}>🏢</Text>
           <Text style={styles.stateTitle}>No companies yet</Text>
           <Text style={styles.stateText}>
             Companies will appear here once they upload their first 3D models
           </Text>
-        </View>
+          <TouchableOpacity onPress={fetchCompanies} style={{ marginTop: 20 }}>
+            <Text style={styles.retryText}>Tap to refresh</Text>
+          </TouchableOpacity>
+        </ScrollView>
       ) : (
         <FlatList
           data={companies}

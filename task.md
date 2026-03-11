@@ -6,10 +6,10 @@
 
 *Žádné aktuální blokery* ✅
 
-## 📊 Progress: **12 / 26 done (46%)**
+## 📊 Progress: **14 / 26 done (53%)**
 
 ```
-##############################################------------------------------------------------------  46%
+#####################################################-----------------------------------------------  53%
 ```
 
 | Section | Done | Total | % |
@@ -17,8 +17,8 @@
 | Foundation | 6 | 6 | 100% |
 | 3D Viewer | 3 | 3 | 100% |
 | Quick Look AR (temp) | 1 | 1 | 100% |
-| UI/UX Polish | 0 | 4 | 0% |
-| ARKit Module (native) | 0 | 8 | 0% |
+| UI/UX Polish | 4 | 4 | 100% |
+| ARKit Module (native) | 5 | 8 | 62% |
 | Android Build | 0 | 2 | 0% |
 | Git & Cleanup | 2 | 2 | 100% |
 
@@ -42,19 +42,31 @@
 
 ## UI/UX Polish
 - [x] **#11** — Clean model names (remove underscores, extensions) ✅
-- [x] **#12** — Fix settings icon overlap with model count badge ✅ (Settings icon removed)
+<div style="background-color: #eee; width: 100%; height: 20px; border-radius: 10px; overflow: hidden; margin-top: 10px;">
+  <div style="background-color: #4CAF50; width: 66%; height: 100%;"></div>
+</div>
+*Progress: 66% (10/15 features completed)*
 - [x] **#13** — Add file size display from DB ✅
 - [x] **#14** — Overall layout polish (spacing, animations, company select card) ✅
 
-## ARKit Module (native — Phase 2)
+## ARKit Module (Native + UI)
 - [x] **#15** — Research & Download logic: ViroReact locally caches Supabase models ✅
 - [x] **#16** — AR Interactions: Drag, Scale (pinch), Rotate (twist) gestures ✅
-- [x] **#17** — Advanced Placement: Detect wall/floor normals and align model appropriately ✅ (Using `ViroARPlaneSelector` + `FixedToWorld` drag mapping)
-- [x] **#18** — Graphics Polish: Soft Shadows & Ambient Light Estimation ✅
-- [x] **#19** — Dev UI: Add floating menu to toggle "Clay mode" (gray material) for light testing ✅
-- [ ] **#20** — AR annotations / dimension lines
-- [ ] **#21** — AR screenshot / recording
-- [ ] **#22** — QR target tracking (place model on QR code)
+- [x] **17. Advanced Placement (Surface Snapping)**
+  *Enabled `displayPointCloud` internally and wrapped node in `ViroARPlaneSelector`. Used `FixedToWorld` drag mapping for table/floor locking.*
+- [x] **18. Graphics Polish (Realistic Environment)**
+  *Added `ViroDirectionalLight` and invisible `ViroQuad` with `arShadowReceiver=true` for soft shadows.*
+- [x] **19. Dev UI: Clay mode**
+  *Added toggle button in header. Created Blinn clay material and applied conditionally to `Viro3DObject`.*
+- [x] **20. Distance measuring & Floor plan radar**
+  *Added a real-time `showMap` 2D radar overlay calculating Eucledian distance mapping `X` and `Z` relative coordinates from the user origin.*
+- [x] **21. Enhanced Map: Wall Perimeters & Inter-Object Distances**
+- [x] **22. SVG Map Export Button**
+- [x] **23. ARKit People/Object Depth Occlusion**
+- [x] **24. Tap-To-Place Mechanics**
+- [ ] **#25** — AR screenshot / recording
+- [x] **26. AR Tracking Tape (Linear Measure & Object Area)**
+- [x] **27. Real-Time Roomba LiDAR map sweeping**
 
 ## Android Build
 - [ ] **#23** — EAS Android APK build

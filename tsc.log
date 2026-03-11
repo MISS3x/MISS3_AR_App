@@ -1,0 +1,4 @@
+src/screens/ObjectPlanScreen.native.tsx(11,24): error TS2307: Cannot find module 'react-native-svg' or its corresponding type declarations.
+src/screens/ObjectPlanScreen.native.tsx(12,26): error TS2307: Cannot find module 'expo-sharing' or its corresponding type declarations.
+src/screens/ObjectPlanScreen.native.tsx(293,44): error TS7006: Parameter 'prev' implicitly has an 'any' type.
+src/screens/ObjectPlanScreen.native.tsx(300,20): error TS7006: Parameter 'prev' implicitly has an 'any' type.

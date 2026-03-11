@@ -371,14 +371,15 @@ const ARScene = (props: any) => {
         </ViroNode>
       ))}
 
-      <ViroAmbientLight color="#ffffff" intensity={200} />
-      {/* We use a low shadowMapSize (512) and low opacity to naturally blur the shadow via PCF Native filtering, simulating an Ambient Occlusion contact shadow. */}
+      <ViroAmbientLight color="#ffffff" intensity={300} />
+      {/* HQ Shadow Ambient Occlusion simulation request via Directional mapping */}
       <ViroDirectionalLight 
         color="#ffffff" 
         direction={[0, -1, -0.2]} 
-        intensity={400} 
-        castsShadow={true} shadowMapSize={512}
-        shadowNearZ={0.1} shadowFarZ={5} shadowOpacity={0.5}
+        intensity={500} 
+        castsShadow={true} 
+        shadowMapSize={2048}
+        shadowNearZ={0.1} shadowFarZ={5} shadowOpacity={0.6}
       />
       
       {placedObjects && placedObjects.map((obj: ARPlacedObject, i: number) => (
@@ -491,6 +492,7 @@ export default function SandboxARScreen({ navigation }: any) {
         }}
         style={styles.viroContainer} 
         occlusionMode="depthBased"
+        displayPointCloud={showMap}
       />
 
       {/* 2D MAP / FLOOR PLAN GENERATOR OVERLAY */}
@@ -648,9 +650,4 @@ const styles = StyleSheet.create({
   
   exportButton: { marginTop: spacing.lg, paddingVertical: spacing.md, paddingHorizontal: spacing.xl, backgroundColor: '#2196F3', borderRadius: borderRadius.md, ...shadows.md },
   exportButtonText: { color: '#FFF', fontFamily: typography.fontFamily.bold, letterSpacing: 1 },
-
-  promptOverlay: { position: 'absolute', top: 120, left: spacing.md, right: spacing.md, alignItems: 'center', zIndex: 12, pointerEvents: 'none' },
-  promptText: { backgroundColor: 'rgba(0,0,0,0.8)', color: colors.primary, paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderRadius: 30, fontFamily: typography.fontFamily.semiBold, ...shadows.md, overflow: 'hidden'},
-  
-  bottomOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, alignItems: 'center', zIndex: 10 },
 });

@@ -1,0 +1,49 @@
+{
+  "id": "a0d2b7f7-c09f-47df-ba03-ade6deb3378b",
+  "status": "ERRORED",
+  "platform": "IOS",
+  "error": {
+    "errorCode": "UNKNOWN_ERROR",
+    "message": "Unknown error. See logs of the Build complete hook build phase for more information."
+  },
+  "artifacts": {
+    "xcodeBuildLogsUrl": "https://job-logs.eascdn.net/production-xcode-logs/a0d2b7f7-c09f-47df-ba03-ade6deb3378b?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=www-production%40exponentjs.iam.gserviceaccount.com%2F20260310%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260310T225658Z&X-Goog-Expires=900&X-Goog-SignedHeaders=host&X-Goog-Signature=7fd34064a409e24684480cd6b24a5e80a7f94820bd0678be81d63c69ea2b00a886fb12bc848a774dbdce0034999e54d2d0505d959035f7b47b4d34fa97281aec471808bdb00d51f0a6b716a36c6ce37019cbee595f479cba2cf37b55dc385517a76531b29b96d1aac2d3a7a9ccc638401851ed991a18f08daeb61442b87da6b252c87cd3d4506f9fb7632022c6478bbab11b199ed857e9bd08e1c58499b04a9e506c95fc8bbb3e06d318363ab18bc39c03fa42b2c9e81a495086b278a5db11fb8080cf25e45f5a62f64cdff5e8377e4b0b9a5522545ebe5cf1b0485800d724fe404bf013b19bfe23d7fe412461d01afe300969bf195c583f905cd39b50d2eb2a"
+  },
+  "initiatingActor": {
+    "id": "58c36c77-b10e-49af-8eff-a75bd6111be8",
+    "displayName": "miss3x"
+  },
+  "logFiles": [
+    "https://job-logs.eascdn.net/production/a0d2b7f7-c09f-47df-ba03-ade6deb3378b/1773170516199-2b384711-9edf-4e48-b8c9-486dde043244.txt?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=www-production%40exponentjs.iam.gserviceaccount.com%2F20260310%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260310T225658Z&X-Goog-Expires=900&X-Goog-SignedHeaders=host&X-Goog-Signature=1e91cec6b061abfb1715e85b6f378781c7b1b1f15df2cba519ceadaed5eaca3ffc059b39f89b6cf8a022f712c273f219809e06eb03880f728fb0acdbf20781bbd05598185837162c1be4a92570667eb859dedc7146e7368fbf9cece4e0a6fcbc5b53bb8c530ec213938f88d40efedc7ee3f87220f538c5b7eaa8dafba4b71d3601262bcb494d838947d6693c0d2b07c5d66542637cb77282a5817b708f425e76cd46b0669716fd2713e715f49032dd6c96a2be6b1a078fad046639782d32d04eb27ab7bb998a2adfc5c6744de28ce1e9a0a3fc6f47e4bef0ace1daa64e9263ad987402eb768b286c5a3b77b4bc973a5cee8e83b76c89c2544bafe89957a99486",
+    "https://job-logs.eascdn.net/production/a0d2b7f7-c09f-47df-ba03-ade6deb3378b/1773179650247-2e1cf33c-b378-442b-b38b-5a020748b3f5.txt?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=www-production%40exponentjs.iam.gserviceaccount.com%2F20260310%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260310T225658Z&X-Goog-Expires=900&X-Goog-SignedHeaders=host&X-Goog-Signature=b6d98e7abb0db359d766a50bb41aece13b4928dbd9e3467f6fab03a6ec0f0a0a08f90b414b25940b2f6c9f9aa76ce5cf314f0e9627ac676056665da5927c5b4887bc32040bdc97344b89703cdfb74f34c826ff68fba62e104cfe1b16a09a7597ddab02a60f0e80c7cdc448cd9530d932c813d8d10f51ad2ec768265ae9e6263cc8c972f02272315ee03f47ccb8fc465701280506a77ac3e60554410b980ad44104f47c30391b751838b62c5c9471e58c26f29f202ece037f5e17798c757ae81c72f24820537578daf7ff8724a4cab3fdcd643d5d7a8b3d3a15ad4f1f736a8e131dd719478dcd556fe0c612a7b33a571659b01ae9ecfa5aa168868089da1d737e",
+    "https://job-logs.eascdn.net/production/a0d2b7f7-c09f-47df-ba03-ade6deb3378b/1773179650548-6ee1dfab-faef-44eb-9f97-69fe34c32e7c.txt?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=www-production%40exponentjs.iam.gserviceaccount.com%2F20260310%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260310T225658Z&X-Goog-Expires=900&X-Goog-SignedHeaders=host&X-Goog-Signature=a655d6dcfd5f79b9a126e5258f81cc5896b7e2b497b90d1205ce87295ab2d74bdcd86dfd7e71cd7211dd457db2c8e301b05050023984f08bf5d05af4cd232c19a1c9410c58bc5043ce8a58bca864248fa651e88a8ad41362f764f5aa0c9f0b4af92f46f8b23e7666567962c03750aa1e415f98edaa9c7938a7d97ac3deb750455b1e05f121ef3a5e2d9ca11da0c6e177abd04e54e04355911796f29df3475841b12ab4b1136d31c5ea047c10ae6586ba76b72615585ff250d2fccf0426480ed446c31ba7194bf91c89e2a8cf7e07fd725eafb65dc20ba1e134d738b0e71187562089c9f3ecc3e62f770ec4b61be77c85d39c2a3728f5ff0c69301aead6cb0037",
+    "https://job-logs.eascdn.net/production/a0d2b7f7-c09f-47df-ba03-ade6deb3378b/1773179650750-11abe939-6e8d-4962-89c2-1a136eea8dd2.txt?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=www-production%40exponentjs.iam.gserviceaccount.com%2F20260310%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260310T225658Z&X-Goog-Expires=900&X-Goog-SignedHeaders=host&X-Goog-Signature=28aa136a9c497b05eb4402ecddeaee79081534aa35414063ad3b5fac617ad4c852a96f6514e12a47f0a3a1d021a16dd8a11996a8f882c045ca75012f7a4f8cf5545c92d38980ad2b307fd004a39d1188a18b8f60e5ce9eb9a4d8f1276dc1c8a3e74942661f165fbdb31293fc9270ca1029913e9aad0cc737dd08f78d541ca3ca173ee2762c1a12798a5403eee8e6bd466696af94ace572ecedd87a96aeae411aeab17a7bddd39565842431295e89066089c5ea9c04e242afe8097c8dbce98b3e3ae25cdb16afa3e295dff285bbe3821bb5a93a8dedeb355faf236c524830aaf73016bededa462222cd671b15bc6dc2ca6c7e01c1f57c85eee6d9cd6c30385626"
+  ],
+  "project": {
+    "id": "d430025a-3859-42f7-9b32-840f6a2e5a42",
+    "name": "miss3-ar",
+    "slug": "miss3-ar",
+    "ownerAccount": {
+      "id": "cff4dfc4-e24e-4f31-ae16-75d2ff1622be",
+      "name": "miss3x"
+    }
+  },
+  "distribution": "INTERNAL",
+  "buildProfile": "development",
+  "sdkVersion": "55.0.0",
+  "appVersion": "1.0.0",
+  "appBuildVersion": "1",
+  "gitCommitHash": "1074310ef79e8c8b0fd922c3e92525dbe0291252",
+  "gitCommitMessage": "chore: cleanup unused AR deps",
+  "priority": "NORMAL",
+  "createdAt": "2026-03-10T19:21:54.977Z",
+  "updatedAt": "2026-03-10T21:55:10.290Z",
+  "completedAt": "2026-03-10T21:55:03.167Z",
+  "expirationDate": "2026-03-24T19:21:55.413Z",
+  "isForIosSimulator": false,
+  "metrics": {
+    "buildWaitTime": 1062,
+    "buildQueueTime": 9174623,
+    "buildDuration": 8361
+  }
+}

@@ -7,7 +7,6 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "scheme": "miss3ar",
-    "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -50,7 +49,8 @@
         {
           "androidXxrMode": "AR"
         }
-      ]
+      ],
+      "expo-sharing"
     ]
   }
 }

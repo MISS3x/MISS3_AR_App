@@ -283,7 +283,6 @@ export default function ARRulerScreen({ navigation }: any) {
         initialScene={{ scene: ARScene }} 
         viroAppProps={{ nodes, setNodes }}
         style={styles.viroContainer} 
-        occlusionMode="depthBased"
       />
       
       {/* Top Header */}

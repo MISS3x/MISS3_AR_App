@@ -371,15 +371,14 @@ const ARScene = (props: any) => {
         </ViroNode>
       ))}
 
-      <ViroAmbientLight color="#ffffff" intensity={300} />
-      {/* HQ Shadow Ambient Occlusion simulation request via Directional mapping */}
+      <ViroAmbientLight color="#ffffff" intensity={200} />
+      {/* Soft AO shadow via low-res PCF-blurred shadow map */}
       <ViroDirectionalLight 
         color="#ffffff" 
         direction={[0, -1, -0.2]} 
-        intensity={500} 
-        castsShadow={true} 
-        shadowMapSize={2048}
-        shadowNearZ={0.1} shadowFarZ={5} shadowOpacity={0.6}
+        intensity={400} 
+        castsShadow={true} shadowMapSize={512}
+        shadowNearZ={0.1} shadowFarZ={5} shadowOpacity={0.5}
       />
       
       {placedObjects && placedObjects.map((obj: ARPlacedObject, i: number) => (
@@ -492,7 +491,6 @@ export default function SandboxARScreen({ navigation }: any) {
         }}
         style={styles.viroContainer} 
         occlusionMode="depthBased"
-        displayPointCloud={showMap}
       />
 
       {/* 2D MAP / FLOOR PLAN GENERATOR OVERLAY */}

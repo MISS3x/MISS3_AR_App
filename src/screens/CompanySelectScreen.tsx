@@ -207,7 +207,7 @@ export default function CompanySelectScreen({ navigation }: CompanySelectScreenP
           onPress={() => navigation.navigate('ARRuler')}
         >
           <LinearGradient
-            colors={['#8E2DE2', '#4A00E0']} // Purple gradient for differentiation
+            colors={['#8E2DE2', '#4A00E0']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.sandboxGradient}

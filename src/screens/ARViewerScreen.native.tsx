@@ -6,7 +6,7 @@ import {
   ViroNode, ViroDirectionalLight, ViroSpotLight, ViroQuad, ViroMaterials,
   ViroARPlaneSelector, ViroARPlane, ViroBox, ViroAnimations, ViroText
 } from '@reactvision/react-viro';
-// expo-file-system removed (crashes this native build)
+import * as FileSystem from 'expo-file-system/legacy';
 import { colors, spacing, borderRadius, typography } from '../theme/theme';
 // Textures removed — using color-only materials
 
@@ -356,14 +356,44 @@ export default function ARViewerScreen({ route, navigation }: ARViewerScreenProp
   const [objectPosition, setObjectPosition] = useState<[number, number, number]>([0, 0, 0]);
   const [isPlaced, setIsPlaced] = useState(false);
 
-  // Pass model URL directly to ViroReact (supports remote URLs)
+  // Download model to local filesystem (ViroReact requires local file paths)
   useEffect(() => {
     let isMounted = true;
-    console.log("Loading model directly from URL:", modelUrl);
-    if (isMounted) {
-      setLocalModelPath(modelUrl);
-      setIsLoading(false);
-    }
+    const downloadModel = async () => {
+      try {
+        setIsLoading(true);
+        setDownloadError(null);
+
+        const fileName = modelUrl.split('?')[0].split('/').pop() || 'model.glb';
+        const localUri = `${FileSystem.documentDirectory}${fileName}`;
+
+        const fileInfo = await FileSystem.getInfoAsync(localUri);
+        if (fileInfo.exists) {
+           console.log("Model loaded from cache:", localUri);
+           if (isMounted) {
+             setLocalModelPath(`file://${localUri}`);
+             setIsLoading(false);
+           }
+           return;
+        }
+
+        console.log("Downloading model from Supabase to:", localUri);
+        const { uri } = await FileSystem.downloadAsync(modelUrl, localUri);
+        
+        if (isMounted) {
+          setLocalModelPath(`file://${uri}`);
+          setIsLoading(false);
+        }
+      } catch (err) {
+        console.error("Failed to download model for AR:", err);
+        if (isMounted) {
+          setDownloadError("Failed to download 3D model.");
+          setIsLoading(false);
+        }
+      }
+    };
+
+    downloadModel();
     return () => { isMounted = false; };
   }, [modelUrl]);
 

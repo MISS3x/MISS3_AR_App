@@ -8,8 +8,9 @@ import {
   ViroARPlaneSelector, ViroBox, ViroARPlane, ViroAnimations, ViroText
 } from '@reactvision/react-viro';
 import * as FileSystem from 'expo-file-system/legacy';
-import { SvgXml } from 'react-native-svg';
-import * as Sharing from 'expo-sharing';
+// react-native-svg and expo-sharing temporarily disabled (native dep issue)
+// import { SvgXml } from 'react-native-svg';
+// import * as Sharing from 'expo-sharing';
 import { colors, spacing, borderRadius, typography, shadows } from '../theme/theme';
 import { supabase } from '../lib/supabase';
 
@@ -497,7 +498,8 @@ export default function SandboxARScreen({ navigation }: any) {
       {showMap && (
         <View style={styles.mapOverlay} pointerEvents="box-none">
            <View style={styles.mapGrid}>
-              <SvgXml xml={generateFloorPlanSVG(placedObjects, planes)} width="100%" height="100%" />
+               {/* SvgXml temporarily replaced — react-native-svg removed */}
+               <Text style={{color: '#0FF', fontSize: 10, padding: 8}}>Floor Plan (SVG rendering disabled)</Text>
            </View>
            
            <TouchableOpacity 
@@ -507,11 +509,7 @@ export default function SandboxARScreen({ navigation }: any) {
                    const svgString = generateFloorPlanSVG(placedObjects, planes);
                    const fileUri = `${FileSystem.documentDirectory}floorplan_${Date.now()}.svg`;
                    await FileSystem.writeAsStringAsync(fileUri, svgString, { encoding: FileSystem.EncodingType.UTF8 });
-                   if (await Sharing.isAvailableAsync()) {
-                      await Sharing.shareAsync(fileUri, { UTI: 'public.svg-image', mimeType: 'image/svg+xml' });
-                   } else {
-                      Alert.alert("Error", "Sharing is not available on this device.");
-                   }
+                   Alert.alert("SVG Saved", `Floor plan saved to: ${fileUri}`);
                 } catch (e) {
                    Alert.alert("Export Failed", "Could not generate or save SVG map.");
                 }

@@ -179,6 +179,37 @@ export default function CompanySelectScreen({ navigation }: CompanySelectScreenP
         Browse product catalogs in augmented reality
       </Text>
 
+      {/* Tools Section */}
+      <View style={styles.toolsSection}>
+        <Text style={styles.toolsSectionTitle}>TOOLS</Text>
+        <TouchableOpacity 
+          onPress={() => navigation.navigate('RoomSandbox')}
+          activeOpacity={0.85}
+          style={styles.toolCard}
+        >
+          <LinearGradient
+            colors={['#1a1a3e', '#0d1b2a']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.toolCardGradient}
+          >
+            <View style={styles.toolCardLeft}>
+              <Text style={styles.toolIcon}>📐</Text>
+              <View>
+                <Text style={styles.toolTitle}>Floor Generator</Text>
+                <Text style={styles.toolSubtitle}>Scan rooms & place objects in AR</Text>
+              </View>
+            </View>
+            <View style={styles.proBadge}>
+              <Text style={styles.proBadgeText}>PRO</Text>
+            </View>
+          </LinearGradient>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.sectionDivider} />
+      <Text style={styles.sectionTitle}>Companies</Text>
+
       {/* Content */}
       {loading ? (
         <ScrollView
@@ -392,5 +423,75 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.md,
     color: colors.primary,
     marginTop: spacing.md,
+  },
+  // Tools Section
+  toolsSection: {
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  toolsSectionTitle: {
+    fontFamily: typography.fontFamily.bold,
+    fontSize: 10,
+    color: colors.textTertiary,
+    letterSpacing: 2,
+    marginBottom: spacing.sm,
+  },
+  toolCard: {
+    borderRadius: borderRadius.lg,
+    overflow: 'hidden',
+    ...shadows.md,
+  },
+  toolCardGradient: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'space-between' as const,
+    padding: spacing.md,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(100, 100, 255, 0.2)',
+  },
+  toolCardLeft: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing.md,
+  },
+  toolIcon: {
+    fontSize: 28,
+  },
+  toolTitle: {
+    fontFamily: typography.fontFamily.semiBold,
+    fontSize: typography.fontSize.md,
+    color: colors.textPrimary,
+  },
+  toolSubtitle: {
+    fontFamily: typography.fontFamily.regular,
+    fontSize: typography.fontSize.xs,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  proBadge: {
+    backgroundColor: colors.primary,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: borderRadius.sm,
+  },
+  proBadgeText: {
+    fontFamily: typography.fontFamily.bold,
+    fontSize: 10,
+    color: '#000',
+    letterSpacing: 1,
+  },
+  sectionDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+  },
+  sectionTitle: {
+    fontFamily: typography.fontFamily.heading,
+    fontSize: typography.fontSize.md,
+    color: colors.textPrimary,
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
   },
 });

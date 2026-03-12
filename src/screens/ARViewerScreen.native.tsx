@@ -8,7 +8,6 @@ import {
 } from '@reactvision/react-viro';
 import * as FileSystem from 'expo-file-system/legacy';
 import { colors, spacing, borderRadius, typography } from '../theme/theme';
-// Textures removed — using color-only materials
 
 ViroMaterials.createMaterials({
   clayMaterial: {
@@ -20,7 +19,7 @@ ViroMaterials.createMaterials({
   trackingMaterial: {
     lightingModel: "Constant",
     blendMode: "Add",
-    diffuseColor: "rgba(0, 255, 255, 0.2)",
+    diffuseColor: "rgba(0, 255, 255, 0.15)",
   },
   ringMaterial: {
     lightingModel: "Constant",
@@ -420,34 +419,6 @@ export default function ARViewerScreen({ route, navigation }: ARViewerScreenProp
         occlusionMode="depthBased"
       />
 
-      {/* 2D MAP OVERLAY */}
-      {showMap && (
-        <View style={styles.mapOverlay} pointerEvents="none">
-           {/* Grid Pattern Background */}
-           <View style={styles.mapGrid}>
-             {/* Center Point - The Phone/User */}
-             <View style={styles.mapUserDot}>
-               <Text style={styles.mapUserText}>YOU</Text>
-               <View style={styles.mapUserDotInner} />
-             </View>
-             
-             {/* Object Position - scaled by e.g. 100 pixels per meter */}
-             <View style={[
-               styles.mapObjectBox, 
-               { 
-                 // Z is inverted in Viro (forward is negative Z)
-                 // We multiply by 100 (1m = 100px)
-                 transform: [
-                   { translateX: objectPosition[0] * 100 },
-                   { translateY: objectPosition[2] * 100 } // Z axis is mapped to Y axis on 2D screen
-                 ] 
-               }
-             ]}>
-               <Text style={styles.mapObjectText}>{Math.sqrt(Math.pow(objectPosition[0], 2) + Math.pow(objectPosition[2], 2)).toFixed(2)}m</Text>
-             </View>
-           </View>
-        </View>
-      )}
 
       {/* Crosshair for placement (placeholder for now) */}
       {!isLoading && !downloadError && (
@@ -472,19 +443,6 @@ export default function ARViewerScreen({ route, navigation }: ARViewerScreenProp
           <Text style={styles.clayButtonText}>MESH</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity 
-          style={[styles.clayButton, showMap && styles.clayButtonActive]} 
-          onPress={() => setShowMap(!showMap)}
-        >
-          <Text style={styles.clayButtonText}>MAP</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={[styles.clayButton, isTestCube && styles.clayButtonActive]} 
-          onPress={() => setIsTestCube(!isTestCube)}
-        >
-          <Text style={styles.clayButtonText}>1M CUBE</Text>
-        </TouchableOpacity>
       </View>
 
       {/* Loading overlay for downloading payload */}

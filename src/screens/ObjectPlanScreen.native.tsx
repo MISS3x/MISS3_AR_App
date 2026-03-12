@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Modal, FlatList, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Modal, FlatList, Alert, ScrollView, PanResponder } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import {
@@ -7,7 +7,7 @@ import {
   ViroNode, ViroDirectionalLight, ViroQuad, ViroMaterials,
   ViroARPlaneSelector, ViroBox, ViroARPlane, ViroAnimations, ViroText
 } from '@reactvision/react-viro';
-// expo-file-system, react-native-svg, expo-sharing all removed (crash this build)
+import * as FileSystem from 'expo-file-system/legacy';
 
 import { colors, spacing, borderRadius, typography, shadows } from '../theme/theme';
 import { supabase } from '../lib/supabase';
@@ -22,7 +22,7 @@ ViroMaterials.createMaterials({
   trackingMaterial: {
     lightingModel: "Constant",
     blendMode: "Add",
-    diffuseColor: "rgba(0, 255, 255, 0.2)",
+    diffuseColor: "rgba(0, 255, 255, 0.15)",
   },
   ringMaterial: {
     lightingModel: "Constant",
@@ -396,6 +396,7 @@ export default function SandboxARScreen({ navigation }: any) {
   // AR View States
   const [showMap, setShowMap] = useState(false);
   const [showMesh, setShowMesh] = useState(true);
+  const [cutHeight, setCutHeight] = useState(1.0); // Cross-section height in meters (0-3m)
   
   // Hoisted state for Wall and Floor detection from ARKit
   const [planes, setPlanes] = useState<{[key: string]: any}>({});
@@ -434,8 +435,6 @@ export default function SandboxARScreen({ navigation }: any) {
   const handleSelectModelFromCatalog = async (model: CatalogModel) => {
     setDownloadingModelId(model.id);
     try {
-      let readyUri = '';
-      
       // Securely request signed URL from Supabase
       const { data: signedData, error: signedError } = await supabase
         .storage
@@ -445,17 +444,30 @@ export default function SandboxARScreen({ navigation }: any) {
       if (signedError || !signedData?.signedUrl) {
          throw new Error("Could not generate secure file URL");
       }
-      readyUri = signedData.signedUrl;
-      
-      // Pass signed URL directly to ViroReact
+
+      // Download model to local filesystem (ViroReact requires local files)
+      const fileName = model.storage_path.split('/').pop() || 'model.glb';
+      const localUri = `${FileSystem.documentDirectory}${fileName}`;
+
+      const fileInfo = await FileSystem.getInfoAsync(localUri);
+      let finalUri = localUri;
+      if (!fileInfo.exists) {
+        console.log('Downloading model to:', localUri);
+        const { uri } = await FileSystem.downloadAsync(signedData.signedUrl, localUri);
+        finalUri = uri;
+      } else {
+        console.log('Model loaded from cache:', localUri);
+      }
+
       setPendingModelContext({
          ...model,
-         localUri: readyUri
+         localUri: `file://${finalUri}`
       });
       
-      setIsCatalogOpen(false); // Close Modal so they can see the AR scene and tap to drop
+      setIsCatalogOpen(false);
     } catch (err) {
       console.error("Failed to download model:", err);
+      Alert.alert('Download Failed', 'Could not download the 3D model.');
     } finally {
       setDownloadingModelId(null);
     }
@@ -482,28 +494,235 @@ export default function SandboxARScreen({ navigation }: any) {
         occlusionMode="depthBased"
       />
 
-      {/* 2D MAP / FLOOR PLAN GENERATOR OVERLAY */}
-      {showMap && (
+      {/* 2D BLUEPRINT FLOOR PLAN OVERLAY */}
+      {showMap && (() => {
+        // Separate wall planes from floor planes
+        const wallPlanes = Object.values(planes).filter((p: any) => {
+          if (!p.position || p.alignment !== 'Vertical') return false;
+          // Filter walls by cut height intersection
+          const wallBottom = p.position[1] - (p.height || 0) / 2;
+          const wallTop = p.position[1] + (p.height || 0) / 2;
+          return cutHeight >= wallBottom && cutHeight <= wallTop;
+        });
+        const allWallPlanes = Object.values(planes).filter((p: any) => p.position && p.alignment === 'Vertical');
+        const floorPlanes = Object.values(planes).filter((p: any) => p.position && p.alignment !== 'Vertical');
+        
+        // Calculate bounds from ALL planes (using rotation for wall endpoints)
+        let minX = -2, maxX = 2, minZ = -2, maxZ = 2;
+        Object.values(planes).forEach((p: any) => {
+          if (!p.position) return;
+          if (p.alignment === 'Vertical' && p.rotation) {
+            // Wall: compute actual endpoints using rotation
+            const yRotDeg = p.rotation[1];
+            const wallAngleRad = ((yRotDeg + 90) * Math.PI) / 180;
+            const halfW = p.width / 2;
+            const x1 = p.position[0] + Math.cos(wallAngleRad) * halfW;
+            const z1 = p.position[2] + Math.sin(wallAngleRad) * halfW;
+            const x2 = p.position[0] - Math.cos(wallAngleRad) * halfW;
+            const z2 = p.position[2] - Math.sin(wallAngleRad) * halfW;
+            if (Math.min(x1, x2) < minX) minX = Math.min(x1, x2);
+            if (Math.max(x1, x2) > maxX) maxX = Math.max(x1, x2);
+            if (Math.min(z1, z2) < minZ) minZ = Math.min(z1, z2);
+            if (Math.max(z1, z2) > maxZ) maxZ = Math.max(z1, z2);
+          } else {
+            // Floor: use center ± half dimensions
+            const hw = p.width / 2;
+            const hh = p.height / 2;
+            if (p.position[0] - hw < minX) minX = p.position[0] - hw;
+            if (p.position[0] + hw > maxX) maxX = p.position[0] + hw;
+            if (p.position[2] - hh < minZ) minZ = p.position[2] - hh;
+            if (p.position[2] + hh > maxZ) maxZ = p.position[2] + hh;
+          }
+        });
+        placedObjects.forEach(obj => {
+          if (obj.position[0] < minX) minX = obj.position[0] - 0.5;
+          if (obj.position[0] > maxX) maxX = obj.position[0] + 0.5;
+          if (obj.position[2] < minZ) minZ = obj.position[2] - 0.5;
+          if (obj.position[2] > maxZ) maxZ = obj.position[2] + 0.5;
+        });
+        
+        minX -= 0.5; maxX += 0.5; minZ -= 0.5; maxZ += 0.5;
+        const worldW = maxX - minX;
+        const worldH = maxZ - minZ;
+        const mapW = 300;
+        const mapH = 380;
+        const scale = Math.min(mapW / worldW, mapH / worldH);
+        const oX = (mapW - worldW * scale) / 2;
+        const oY = (mapH - worldH * scale) / 2;
+        
+        const toX = (x: number) => oX + (x - minX) * scale;
+        const toY = (z: number) => oY + (z - minZ) * scale;
+        const toW = (w: number) => w * scale;
+        
+        // Calculate floor area (sum of horizontal plane areas)
+        let totalFloorArea = 0;
+        floorPlanes.forEach((p: any) => { totalFloorArea += p.width * p.height; });
+        
+        // Calculate wall perimeter (sum of wall widths)
+        let totalWallPerimeter = 0;
+        wallPlanes.forEach((p: any) => { totalWallPerimeter += p.width; });
+
+        // Pixel snap for occupancy grid look (snap to 4px grid)
+        const snap = (v: number) => Math.round(v / 4) * 4;
+
+        // Grid step in meters  
+        const gridStep = 1; // 1 meter grid
+
+        return (
         <View style={styles.mapOverlay} pointerEvents="box-none">
-           <View style={styles.mapGrid}>
-               <Text style={{color: '#0FF', fontSize: 10, padding: 8}}>Floor Plan (SVG preview disabled)</Text>
+           {/* Stats bar */}
+           <View style={{ flexDirection: 'row', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
+             <View style={{ backgroundColor: 'rgba(0,0,0,0.7)', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 5 }}>
+               <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 8, fontWeight: '700', letterSpacing: 1 }}>AREA</Text>
+               <Text style={{ color: '#0FF', fontSize: 14, fontWeight: '700' }}>{totalFloorArea.toFixed(1)} m²</Text>
+             </View>
+             <View style={{ backgroundColor: 'rgba(0,0,0,0.7)', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 5 }}>
+               <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 8, fontWeight: '700', letterSpacing: 1 }}>WALLS</Text>
+               <Text style={{ color: '#00e5e5', fontSize: 14, fontWeight: '700' }}>{totalWallPerimeter.toFixed(1)} m</Text>
+             </View>
+             <View style={{ backgroundColor: 'rgba(0,0,0,0.7)', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 5 }}>
+               <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 8, fontWeight: '700', letterSpacing: 1 }}>CUT</Text>
+               <Text style={{ color: '#FF6B00', fontSize: 14, fontWeight: '700' }}>{cutHeight.toFixed(1)} m</Text>
+             </View>
+           </View>
+
+           {/* Map + Height Slider row */}
+           <View style={{ flexDirection: 'row', gap: 8 }}>
+
+           <ScrollView 
+             style={{ width: mapW, height: mapH, backgroundColor: '#0a1015', borderRadius: 12, overflow: 'hidden' }}
+             contentContainerStyle={{ width: mapW, height: mapH }}
+             maximumZoomScale={5}
+             minimumZoomScale={1}
+             bouncesZoom={true}
+             showsHorizontalScrollIndicator={false}
+             showsVerticalScrollIndicator={false}
+           >
+              {/* Subtle grid pattern */}
+              {Array.from({ length: Math.ceil(worldW / gridStep) + 1 }, (_, i) => {
+                const px = toX(Math.ceil(minX) + i * gridStep);
+                if (px < 0 || px > mapW) return null;
+                return <View key={`gx-${i}`} style={{ position: 'absolute', left: snap(px), top: 0, width: 1, height: mapH, backgroundColor: 'rgba(0,255,255,0.03)' }} />;
+              })}
+              {Array.from({ length: Math.ceil(worldH / gridStep) + 1 }, (_, i) => {
+                const py = toY(Math.ceil(minZ) + i * gridStep);
+                if (py < 0 || py > mapH) return null;
+                return <View key={`gy-${i}`} style={{ position: 'absolute', left: 0, top: snap(py), width: mapW, height: 1, backgroundColor: 'rgba(0,255,255,0.03)' }} />;
+              })}
+
+              {/* Floor planes — solid dark teal fill (occupancy grid style) */}
+              {floorPlanes.map((p: any) => (
+                <View key={p.anchorId} style={{
+                  position: 'absolute',
+                  left: snap(toX(p.position[0] - p.width/2)),
+                  top: snap(toY(p.position[2] - p.height/2)),
+                  width: snap(toW(p.width)),
+                  height: snap(toW(p.height)),
+                  backgroundColor: '#0d2b2b',
+                  borderWidth: 2,
+                  borderColor: '#00e5e5',
+                }} />
+              ))}
+
+              {/* Wall planes — bright cyan outline lines */}
+              {wallPlanes.map((p: any) => {
+                const yRotDeg = p.rotation ? p.rotation[1] : 0;
+                const wallAngleRad = ((yRotDeg + 90) * Math.PI) / 180;
+                const halfW = p.width / 2;
+                const x1 = p.position[0] + Math.cos(wallAngleRad) * halfW;
+                const z1 = p.position[2] + Math.sin(wallAngleRad) * halfW;
+                const x2 = p.position[0] - Math.cos(wallAngleRad) * halfW;
+                const z2 = p.position[2] - Math.sin(wallAngleRad) * halfW;
+                const px1 = toX(x1), py1 = toY(z1);
+                const px2 = toX(x2), py2 = toY(z2);
+                const dx = px2 - px1, dy = py2 - py1;
+                const lineLen = Math.sqrt(dx*dx + dy*dy);
+                const angleDeg = Math.atan2(dy, dx) * 180 / Math.PI;
+                const mx = (px1 + px2) / 2, my = (py1 + py2) / 2;
+                
+                return (
+                  <React.Fragment key={p.anchorId}>
+                    <View style={{
+                      position: 'absolute',
+                      left: snap(px1), top: snap(py1) - 2,
+                      width: Math.max(snap(lineLen), 4), height: 4,
+                      backgroundColor: '#00e5e5',
+                      transformOrigin: 'left center',
+                      transform: [{ rotate: `${angleDeg}deg` }],
+                    }} />
+                    <View style={{ position: 'absolute', left: snap(mx) - 18, top: snap(my) - 16, backgroundColor: 'rgba(0,0,0,0.85)', borderRadius: 3, paddingHorizontal: 4, paddingVertical: 1 }}>
+                      <Text style={{ color: '#00e5e5', fontSize: 8, fontWeight: '700' }}>{(p.width * 100).toFixed(0)}cm</Text>
+                    </View>
+                  </React.Fragment>
+                );
+              })}
+
+              {/* Placed objects — bright dots */}
+              {placedObjects.map(obj => (
+                <View key={obj.id} style={{
+                  position: 'absolute',
+                  left: snap(toX(obj.position[0])) - 8,
+                  top: snap(toY(obj.position[2])) - 8,
+                  width: 16, height: 16, borderRadius: 8,
+                  backgroundColor: 'rgba(255, 200, 0, 0.9)',
+                  borderWidth: 2, borderColor: '#FFF',
+                  alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <Text style={{ position: 'absolute', top: -14, color: '#FFF', fontSize: 8, fontWeight: '700', width: 60, textAlign: 'center' }} numberOfLines={1}>{obj.title}</Text>
+                </View>
+              ))}
+
+              {/* User position — navigation cursor */}
+              <View style={{
+                position: 'absolute',
+                left: snap(toX(0)) - 10, top: snap(toY(0)) - 10,
+                width: 20, height: 20, borderRadius: 10,
+                backgroundColor: 'rgba(255,255,255,0.15)',
+                borderWidth: 2, borderColor: '#FFF',
+                alignItems: 'center', justifyContent: 'center',
+              }}>
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#FFF' }} />
+                <Text style={{ position: 'absolute', bottom: -14, color: 'rgba(255,255,255,0.7)', fontSize: 7, fontWeight: '600' }}>YOU</Text>
+              </View>
+
+              {/* Scale bar */}
+              <View style={{ position: 'absolute', bottom: 8, right: 8, flexDirection: 'row', alignItems: 'center' }}>
+                <View style={{ width: toW(1), height: 2, backgroundColor: 'rgba(255,255,255,0.5)' }} />
+                <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 7, marginLeft: 3 }}>1m</Text>
+              </View>
+           </ScrollView>
+
+           {/* Vertical cut height slider */}
+           <View style={{ height: mapH, width: 32, backgroundColor: 'rgba(0,0,0,0.7)', borderRadius: 8, justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8 }}>
+             <TouchableOpacity onPress={() => setCutHeight(h => Math.min(3, h + 0.1))} style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }}>
+               <Text style={{ color: '#FFF', fontSize: 16, fontWeight: '700' }}>+</Text>
+             </TouchableOpacity>
+             <View style={{ flex: 1, width: 4, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 2, marginVertical: 8, justifyContent: 'flex-end' }}>
+               <View style={{ width: 4, height: `${(cutHeight / 3) * 100}%` as any, backgroundColor: '#FF6B00', borderRadius: 2 }} />
+             </View>
+             <Text style={{ color: '#FF6B00', fontSize: 9, fontWeight: '700' }}>{cutHeight.toFixed(1)}m</Text>
+             <TouchableOpacity onPress={() => setCutHeight(h => Math.max(0, h - 0.1))} style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center', marginTop: 4 }}>
+               <Text style={{ color: '#FFF', fontSize: 16, fontWeight: '700' }}>−</Text>
+             </TouchableOpacity>
+           </View>
            </View>
            
            <TouchableOpacity 
-             style={styles.exportButton} 
-             onPress={async () => {
-                try {
-                   const svgString = generateFloorPlanSVG(placedObjects, planes);
-                   Alert.alert("SVG Generated", "Floor plan data generated.");
-                } catch (e) {
-                   Alert.alert("Export Failed", "Could not generate or save SVG map.");
-                }
-             }}
-           >
-              <Text style={styles.exportButtonText}>EXPORT SVG</Text>
-           </TouchableOpacity>
+              style={styles.exportButton} 
+              onPress={() => {
+                 try {
+                    const svgString = generateFloorPlanSVG(placedObjects, planes);
+                    Alert.alert("Floor Plan", `Area: ${totalFloorArea.toFixed(1)}m²\nPerimeter: ${totalWallPerimeter.toFixed(1)}m\n${wallPlanes.length} walls, ${floorPlanes.length} floors\n${placedObjects.length} objects`);
+                 } catch (e) {
+                    Alert.alert("Export Failed", "Could not generate floor plan data.");
+                 }
+              }}
+            >
+               <Text style={styles.exportButtonText}>EXPORT</Text>
+            </TouchableOpacity>
         </View>
-      )}
+        );
+      })()}
 
       {/* Tap-To-Place Prompt */}
       {pendingModelContext && (
@@ -631,9 +850,4 @@ const styles = StyleSheet.create({
   
   exportButton: { marginTop: spacing.lg, paddingVertical: spacing.md, paddingHorizontal: spacing.xl, backgroundColor: '#2196F3', borderRadius: borderRadius.md, ...shadows.md },
   exportButtonText: { color: '#FFF', fontFamily: typography.fontFamily.bold, letterSpacing: 1 },
-
-  promptOverlay: { position: 'absolute', top: 120, left: spacing.md, right: spacing.md, alignItems: 'center', zIndex: 12, pointerEvents: 'none' },
-  promptText: { backgroundColor: 'rgba(0,0,0,0.8)', color: colors.primary, paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderRadius: 30, fontFamily: typography.fontFamily.semiBold, ...shadows.md, overflow: 'hidden'},
-  
-  bottomOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, alignItems: 'center', zIndex: 10 },
 });

@@ -259,12 +259,15 @@ const ARScene = (props: any) => {
         shadowOpacity={0.5}
       />
       
-      {/* Render object if available */}
+      {/* Render object ONLY after user taps on a surface */}
+      {isPlaced && (
       <ViroNode
         ref={nodeRef}
+        position={objectPosition}
         scale={currentScale.current}
         rotation={currentRotation.current}
-        dragType="FixedToWorld"
+        dragType="FixedToPlane"
+        dragPlane={{ planePoint: [0, objectPosition[1], 0], planeNormal: [0, 1, 0], maxDistance: 20 }}
         onDrag={handleDrag}
         onPinch={onPinch}
         onRotate={onRotate}
@@ -293,7 +296,7 @@ const ARScene = (props: any) => {
                 const ext = localModelPath.split('.').pop()?.toUpperCase() || 'GLB';
                 return ext === 'GLTF' ? 'GLTF' : ext === 'OBJ' ? 'OBJ' : ext === 'VRX' ? 'VRX' : 'GLB';
               })()}
-              position={[0, yOffset, 0]} // Dynamically lifts object if pivot is centered
+              position={[0, yOffset, 0]}
               scale={[1, 1, 1]}
               onLoadStart={() => console.log("ViroObject Load Start")}
               onLoadEnd={async () => {
@@ -330,6 +333,7 @@ const ARScene = (props: any) => {
           </>
         )}
       </ViroNode>
+      )}
     </ViroARScene>
   );
 };

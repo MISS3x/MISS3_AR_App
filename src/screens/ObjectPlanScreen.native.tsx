@@ -11,6 +11,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 
 import { colors, spacing, borderRadius, typography, shadows } from '../theme/theme';
 import { supabase } from '../lib/supabase';
+import { getMeshSlice, isLidarAvailable } from '../../modules/lidar-mesh/src/index';
 
 ViroMaterials.createMaterials({
   clayMaterial: {
@@ -396,7 +397,11 @@ export default function SandboxARScreen({ navigation }: any) {
   // AR View States
   const [showMap, setShowMap] = useState(false);
   const [showMesh, setShowMesh] = useState(true);
-  const [cutHeight, setCutHeight] = useState(1.0); // Cross-section height in meters (0-3m)
+  const [cutHeight, setCutHeight] = useState(1.0);
+  
+  // LiDAR mesh contour points [x, z]
+  const [meshContour, setMeshContour] = useState<[number, number][]>([]);
+  const [hasLidar, setHasLidar] = useState(false);
   
   // Hoisted state for Wall and Floor detection from ARKit
   const [planes, setPlanes] = useState<{[key: string]: any}>({});
@@ -429,7 +434,25 @@ export default function SandboxARScreen({ navigation }: any) {
 
   useEffect(() => {
     fetchInventory();
+    // Check LiDAR availability
+    setHasLidar(isLidarAvailable());
   }, []);
+
+  // Poll LiDAR mesh when map is visible
+  useEffect(() => {
+    if (!showMap || !hasLidar) return;
+    const interval = setInterval(async () => {
+      try {
+        const points = await getMeshSlice(cutHeight);
+        if (points.length > 0) {
+          setMeshContour(points as [number, number][]);
+        }
+      } catch (e) {
+        // LiDAR not ready yet
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [showMap, hasLidar, cutHeight]);
 
   // When user taps a catalog item, download it and prep it for dropping into the scene
   const handleSelectModelFromCatalog = async (model: CatalogModel) => {
@@ -494,45 +517,25 @@ export default function SandboxARScreen({ navigation }: any) {
         occlusionMode="depthBased"
       />
 
-      {/* 2D BLUEPRINT FLOOR PLAN OVERLAY */}
+      {/* 2D FLOOR PLAN — LiDAR mesh contour + plane fallback */}
       {showMap && (() => {
-        // Separate wall planes from floor planes
-        const wallPlanes = Object.values(planes).filter((p: any) => {
-          if (!p.position || p.alignment !== 'Vertical') return false;
-          // Filter walls by cut height intersection
-          const wallBottom = p.position[1] - (p.height || 0) / 2;
-          const wallTop = p.position[1] + (p.height || 0) / 2;
-          return cutHeight >= wallBottom && cutHeight <= wallTop;
-        });
-        const allWallPlanes = Object.values(planes).filter((p: any) => p.position && p.alignment === 'Vertical');
-        const floorPlanes = Object.values(planes).filter((p: any) => p.position && p.alignment !== 'Vertical');
+        // Use LiDAR contour if available, else fall back to wall plane centers
+        const wallPlanes = Object.values(planes).filter((p: any) =>
+          p.position && p.alignment === 'Vertical'
+        );
         
-        // Calculate bounds from ALL planes (using rotation for wall endpoints)
+        // Primary: LiDAR mesh contour; Fallback: wall plane centers
+        const allPoints: [number, number][] = meshContour.length > 0
+          ? [...meshContour]
+          : wallPlanes.map((p: any) => [p.position[0], p.position[2]] as [number, number]);
+        
+        // Calculate bounds
         let minX = -2, maxX = 2, minZ = -2, maxZ = 2;
-        Object.values(planes).forEach((p: any) => {
-          if (!p.position) return;
-          if (p.alignment === 'Vertical' && p.rotation) {
-            // Wall: compute actual endpoints using rotation
-            const yRotDeg = p.rotation[1];
-            const wallAngleRad = ((yRotDeg + 90) * Math.PI) / 180;
-            const halfW = p.width / 2;
-            const x1 = p.position[0] + Math.cos(wallAngleRad) * halfW;
-            const z1 = p.position[2] + Math.sin(wallAngleRad) * halfW;
-            const x2 = p.position[0] - Math.cos(wallAngleRad) * halfW;
-            const z2 = p.position[2] - Math.sin(wallAngleRad) * halfW;
-            if (Math.min(x1, x2) < minX) minX = Math.min(x1, x2);
-            if (Math.max(x1, x2) > maxX) maxX = Math.max(x1, x2);
-            if (Math.min(z1, z2) < minZ) minZ = Math.min(z1, z2);
-            if (Math.max(z1, z2) > maxZ) maxZ = Math.max(z1, z2);
-          } else {
-            // Floor: use center ± half dimensions
-            const hw = p.width / 2;
-            const hh = p.height / 2;
-            if (p.position[0] - hw < minX) minX = p.position[0] - hw;
-            if (p.position[0] + hw > maxX) maxX = p.position[0] + hw;
-            if (p.position[2] - hh < minZ) minZ = p.position[2] - hh;
-            if (p.position[2] + hh > maxZ) maxZ = p.position[2] + hh;
-          }
+        allPoints.forEach(([x, z]) => {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (z < minZ) minZ = z;
+          if (z > maxZ) maxZ = z;
         });
         placedObjects.forEach(obj => {
           if (obj.position[0] < minX) minX = obj.position[0] - 0.5;
@@ -553,20 +556,62 @@ export default function SandboxARScreen({ navigation }: any) {
         const toX = (x: number) => oX + (x - minX) * scale;
         const toY = (z: number) => oY + (z - minZ) * scale;
         const toW = (w: number) => w * scale;
-        
-        // Calculate floor area (sum of horizontal plane areas)
-        let totalFloorArea = 0;
-        floorPlanes.forEach((p: any) => { totalFloorArea += p.width * p.height; });
-        
-        // Calculate wall perimeter (sum of wall widths)
-        let totalWallPerimeter = 0;
-        wallPlanes.forEach((p: any) => { totalWallPerimeter += p.width; });
-
-        // Pixel snap for occupancy grid look (snap to 4px grid)
         const snap = (v: number) => Math.round(v / 4) * 4;
-
-        // Grid step in meters  
-        const gridStep = 1; // 1 meter grid
+        const gridStep = 1;
+        
+        // TSP nearest-neighbor chain → closed polygon
+        const chain: number[] = [];
+        if (allPoints.length >= 3) {
+          const visited = new Set<number>();
+          chain.push(0);
+          visited.add(0);
+          while (chain.length < allPoints.length) {
+            const last = chain[chain.length - 1];
+            let nearestDist = Infinity;
+            let nearestJ = -1;
+            for (let j = 0; j < allPoints.length; j++) {
+              if (visited.has(j)) continue;
+              const dx = allPoints[last][0] - allPoints[j][0];
+              const dz = allPoints[last][1] - allPoints[j][1];
+              const dist = Math.sqrt(dx*dx + dz*dz);
+              if (dist < nearestDist) { nearestDist = dist; nearestJ = j; }
+            }
+            if (nearestJ >= 0) { chain.push(nearestJ); visited.add(nearestJ); }
+            else break;
+          }
+        }
+        
+        // Build closed loop connections
+        const connections: { x1: number; y1: number; x2: number; y2: number }[] = [];
+        for (let i = 0; i < chain.length; i++) {
+          const a = chain[i], b = chain[(i + 1) % chain.length];
+          connections.push({
+            x1: toX(allPoints[a][0]), y1: toY(allPoints[a][1]),
+            x2: toX(allPoints[b][0]), y2: toY(allPoints[b][1]),
+          });
+        }
+        
+        // Perimeter (meters)
+        let totalPerimeter = 0;
+        for (let i = 0; i < chain.length; i++) {
+          const a = chain[i], b = chain[(i + 1) % chain.length];
+          const dx = allPoints[a][0] - allPoints[b][0];
+          const dz = allPoints[a][1] - allPoints[b][1];
+          totalPerimeter += Math.sqrt(dx*dx + dz*dz);
+        }
+        
+        // Area (Shoelace formula)
+        let estimatedArea = 0;
+        if (chain.length >= 3) {
+          for (let i = 0; i < chain.length; i++) {
+            const a = chain[i], b = chain[(i + 1) % chain.length];
+            estimatedArea += allPoints[a][0] * allPoints[b][1];
+            estimatedArea -= allPoints[b][0] * allPoints[a][1];
+          }
+          estimatedArea = Math.abs(estimatedArea) / 2;
+        }
+        
+        const dataSource = meshContour.length > 0 ? 'LIDAR' : 'PLANES';
 
         return (
         <View style={styles.mapOverlay} pointerEvents="box-none">
@@ -574,15 +619,15 @@ export default function SandboxARScreen({ navigation }: any) {
            <View style={{ flexDirection: 'row', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
              <View style={{ backgroundColor: 'rgba(0,0,0,0.7)', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 5 }}>
                <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 8, fontWeight: '700', letterSpacing: 1 }}>AREA</Text>
-               <Text style={{ color: '#0FF', fontSize: 14, fontWeight: '700' }}>{totalFloorArea.toFixed(1)} m²</Text>
+               <Text style={{ color: '#0FF', fontSize: 14, fontWeight: '700' }}>{estimatedArea.toFixed(1)} m²</Text>
              </View>
              <View style={{ backgroundColor: 'rgba(0,0,0,0.7)', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 5 }}>
-               <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 8, fontWeight: '700', letterSpacing: 1 }}>WALLS</Text>
-               <Text style={{ color: '#00e5e5', fontSize: 14, fontWeight: '700' }}>{totalWallPerimeter.toFixed(1)} m</Text>
+               <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 8, fontWeight: '700', letterSpacing: 1 }}>PERIMETER</Text>
+               <Text style={{ color: '#00e5e5', fontSize: 14, fontWeight: '700' }}>{totalPerimeter.toFixed(1)} m</Text>
              </View>
              <View style={{ backgroundColor: 'rgba(0,0,0,0.7)', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 5 }}>
-               <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 8, fontWeight: '700', letterSpacing: 1 }}>CUT</Text>
-               <Text style={{ color: '#FF6B00', fontSize: 14, fontWeight: '700' }}>{cutHeight.toFixed(1)} m</Text>
+               <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 8, fontWeight: '700', letterSpacing: 1 }}>{dataSource}</Text>
+               <Text style={{ color: '#FF6B00', fontSize: 14, fontWeight: '700' }}>{allPoints.length} pts</Text>
              </View>
            </View>
 
@@ -598,7 +643,7 @@ export default function SandboxARScreen({ navigation }: any) {
              showsHorizontalScrollIndicator={false}
              showsVerticalScrollIndicator={false}
            >
-              {/* Subtle grid pattern */}
+              {/* Subtle grid */}
               {Array.from({ length: Math.ceil(worldW / gridStep) + 1 }, (_, i) => {
                 const px = toX(Math.ceil(minX) + i * gridStep);
                 if (px < 0 || px > mapW) return null;
@@ -610,54 +655,34 @@ export default function SandboxARScreen({ navigation }: any) {
                 return <View key={`gy-${i}`} style={{ position: 'absolute', left: 0, top: snap(py), width: mapW, height: 1, backgroundColor: 'rgba(0,255,255,0.03)' }} />;
               })}
 
-              {/* Floor planes — solid dark teal fill (occupancy grid style) */}
-              {floorPlanes.map((p: any) => (
-                <View key={p.anchorId} style={{
-                  position: 'absolute',
-                  left: snap(toX(p.position[0] - p.width/2)),
-                  top: snap(toY(p.position[2] - p.height/2)),
-                  width: snap(toW(p.width)),
-                  height: snap(toW(p.height)),
-                  backgroundColor: '#0d2b2b',
-                  borderWidth: 2,
-                  borderColor: '#00e5e5',
-                }} />
-              ))}
-
-              {/* Wall planes — bright cyan outline lines */}
-              {wallPlanes.map((p: any) => {
-                const yRotDeg = p.rotation ? p.rotation[1] : 0;
-                const wallAngleRad = ((yRotDeg + 90) * Math.PI) / 180;
-                const halfW = p.width / 2;
-                const x1 = p.position[0] + Math.cos(wallAngleRad) * halfW;
-                const z1 = p.position[2] + Math.sin(wallAngleRad) * halfW;
-                const x2 = p.position[0] - Math.cos(wallAngleRad) * halfW;
-                const z2 = p.position[2] - Math.sin(wallAngleRad) * halfW;
-                const px1 = toX(x1), py1 = toY(z1);
-                const px2 = toX(x2), py2 = toY(z2);
-                const dx = px2 - px1, dy = py2 - py1;
-                const lineLen = Math.sqrt(dx*dx + dy*dy);
-                const angleDeg = Math.atan2(dy, dx) * 180 / Math.PI;
-                const mx = (px1 + px2) / 2, my = (py1 + py2) / 2;
-                
+              {/* Closed polygon connection lines */}
+              {connections.map((c, i) => {
+                const dx = c.x2 - c.x1, dy = c.y2 - c.y1;
+                const len = Math.sqrt(dx*dx + dy*dy);
+                const angle = Math.atan2(dy, dx) * 180 / Math.PI;
                 return (
-                  <React.Fragment key={p.anchorId}>
-                    <View style={{
-                      position: 'absolute',
-                      left: snap(px1), top: snap(py1) - 2,
-                      width: Math.max(snap(lineLen), 4), height: 4,
-                      backgroundColor: '#00e5e5',
-                      transformOrigin: 'left center',
-                      transform: [{ rotate: `${angleDeg}deg` }],
-                    }} />
-                    <View style={{ position: 'absolute', left: snap(mx) - 18, top: snap(my) - 16, backgroundColor: 'rgba(0,0,0,0.85)', borderRadius: 3, paddingHorizontal: 4, paddingVertical: 1 }}>
-                      <Text style={{ color: '#00e5e5', fontSize: 8, fontWeight: '700' }}>{(p.width * 100).toFixed(0)}cm</Text>
-                    </View>
-                  </React.Fragment>
+                  <View key={`conn-${i}`} style={{
+                    position: 'absolute',
+                    left: snap(c.x1), top: snap(c.y1) - 1.5,
+                    width: Math.max(len, 2), height: 3,
+                    backgroundColor: '#00e5e5',
+                    transformOrigin: 'left center',
+                    transform: [{ rotate: `${angle}deg` }],
+                  }} />
                 );
               })}
 
-              {/* Placed objects — bright dots */}
+              {/* Contour points — bright cyan dots */}
+              {allPoints.map(([x, z], i) => (
+                <View key={`sp-${i}`} style={{
+                  position: 'absolute',
+                  left: snap(toX(x)) - 2, top: snap(toY(z)) - 2,
+                  width: 4, height: 4, borderRadius: 2,
+                  backgroundColor: '#00e5e5',
+                }} />
+              ))}
+
+              {/* Placed objects */}
               {placedObjects.map(obj => (
                 <View key={obj.id} style={{
                   position: 'absolute',
@@ -672,7 +697,7 @@ export default function SandboxARScreen({ navigation }: any) {
                 </View>
               ))}
 
-              {/* User position — navigation cursor */}
+              {/* User position */}
               <View style={{
                 position: 'absolute',
                 left: snap(toX(0)) - 10, top: snap(toY(0)) - 10,
@@ -712,7 +737,7 @@ export default function SandboxARScreen({ navigation }: any) {
               onPress={() => {
                  try {
                     const svgString = generateFloorPlanSVG(placedObjects, planes);
-                    Alert.alert("Floor Plan", `Area: ${totalFloorArea.toFixed(1)}m²\nPerimeter: ${totalWallPerimeter.toFixed(1)}m\n${wallPlanes.length} walls, ${floorPlanes.length} floors\n${placedObjects.length} objects`);
+                                        Alert.alert("Floor Plan", `Area: ${estimatedArea.toFixed(1)}m²\nPerimeter: ${totalPerimeter.toFixed(1)}m\n${allPoints.length} points (${dataSource})\n${placedObjects.length} objects`);
                  } catch (e) {
                     Alert.alert("Export Failed", "Could not generate floor plan data.");
                  }

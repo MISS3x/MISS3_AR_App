@@ -7,10 +7,8 @@ import {
   ViroNode, ViroDirectionalLight, ViroQuad, ViroMaterials,
   ViroARPlaneSelector, ViroBox, ViroARPlane, ViroAnimations, ViroText
 } from '@reactvision/react-viro';
-import * as FileSystem from 'expo-file-system/legacy';
-// react-native-svg and expo-sharing temporarily disabled (native dep issue)
-// import { SvgXml } from 'react-native-svg';
-// import * as Sharing from 'expo-sharing';
+// expo-file-system, react-native-svg, expo-sharing all removed (crash this build)
+
 import { colors, spacing, borderRadius, typography, shadows } from '../theme/theme';
 import { supabase } from '../lib/supabase';
 
@@ -373,7 +371,7 @@ const ARScene = (props: any) => {
       ))}
 
       <ViroAmbientLight color="#ffffff" intensity={200} />
-      {/* Soft AO shadow via low-res PCF-blurred shadow map */}
+      {/* We use a low shadowMapSize (512) and low opacity to naturally blur the shadow via PCF Native filtering, simulating an Ambient Occlusion contact shadow. */}
       <ViroDirectionalLight 
         color="#ffffff" 
         direction={[0, -1, -0.2]} 
@@ -436,33 +434,23 @@ export default function SandboxARScreen({ navigation }: any) {
   const handleSelectModelFromCatalog = async (model: CatalogModel) => {
     setDownloadingModelId(model.id);
     try {
-      const fileName = model.storage_path.split('?')[0].split('/').pop() || `${model.id}.glb`;
-      const localUri = `${FileSystem.documentDirectory}${fileName}`;
+      let readyUri = '';
       
-      const fileInfo = await FileSystem.getInfoAsync(localUri);
-      let readyUri = localUri;
-      
-      if (!fileInfo.exists) {
-        console.log("Downloading sandbox model:", localUri);
+      // Securely request signed URL from Supabase
+      const { data: signedData, error: signedError } = await supabase
+        .storage
+        .from('models_secure')
+        .createSignedUrl(model.storage_path, 3600);
         
-        // Securely request signed URL from Supabase
-        const { data: signedData, error: signedError } = await supabase
-          .storage
-          .from('models_secure')
-          .createSignedUrl(model.storage_path, 3600); // 1 hour
-          
-        if (signedError || !signedData?.signedUrl) {
-           throw new Error("Could not generate secure file URL");
-        }
-
-        const downloadRes = await FileSystem.downloadAsync(signedData.signedUrl, localUri);
-        readyUri = downloadRes.uri;
+      if (signedError || !signedData?.signedUrl) {
+         throw new Error("Could not generate secure file URL");
       }
-
-      // Instead of immediately placing it in the world, queue it into the Tap-To-Place context
+      readyUri = signedData.signedUrl;
+      
+      // Pass signed URL directly to ViroReact
       setPendingModelContext({
          ...model,
-         localUri: `file://${readyUri}`
+         localUri: readyUri
       });
       
       setIsCatalogOpen(false); // Close Modal so they can see the AR scene and tap to drop
@@ -498,8 +486,7 @@ export default function SandboxARScreen({ navigation }: any) {
       {showMap && (
         <View style={styles.mapOverlay} pointerEvents="box-none">
            <View style={styles.mapGrid}>
-               {/* SvgXml temporarily replaced — react-native-svg removed */}
-               <Text style={{color: '#0FF', fontSize: 10, padding: 8}}>Floor Plan (SVG rendering disabled)</Text>
+               <Text style={{color: '#0FF', fontSize: 10, padding: 8}}>Floor Plan (SVG preview disabled)</Text>
            </View>
            
            <TouchableOpacity 
@@ -507,9 +494,7 @@ export default function SandboxARScreen({ navigation }: any) {
              onPress={async () => {
                 try {
                    const svgString = generateFloorPlanSVG(placedObjects, planes);
-                   const fileUri = `${FileSystem.documentDirectory}floorplan_${Date.now()}.svg`;
-                   await FileSystem.writeAsStringAsync(fileUri, svgString, { encoding: FileSystem.EncodingType.UTF8 });
-                   Alert.alert("SVG Saved", `Floor plan saved to: ${fileUri}`);
+                   Alert.alert("SVG Generated", "Floor plan data generated.");
                 } catch (e) {
                    Alert.alert("Export Failed", "Could not generate or save SVG map.");
                 }
@@ -646,4 +631,9 @@ const styles = StyleSheet.create({
   
   exportButton: { marginTop: spacing.lg, paddingVertical: spacing.md, paddingHorizontal: spacing.xl, backgroundColor: '#2196F3', borderRadius: borderRadius.md, ...shadows.md },
   exportButtonText: { color: '#FFF', fontFamily: typography.fontFamily.bold, letterSpacing: 1 },
+
+  promptOverlay: { position: 'absolute', top: 120, left: spacing.md, right: spacing.md, alignItems: 'center', zIndex: 12, pointerEvents: 'none' },
+  promptText: { backgroundColor: 'rgba(0,0,0,0.8)', color: colors.primary, paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderRadius: 30, fontFamily: typography.fontFamily.semiBold, ...shadows.md, overflow: 'hidden'},
+  
+  bottomOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, alignItems: 'center', zIndex: 10 },
 });

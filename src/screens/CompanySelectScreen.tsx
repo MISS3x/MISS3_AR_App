@@ -179,49 +179,6 @@ export default function CompanySelectScreen({ navigation }: CompanySelectScreenP
         Browse product catalogs in augmented reality
       </Text>
 
-      {/* Action Buttons (Sandbox & Ruler) */}
-      <View style={{ paddingHorizontal: spacing.lg, marginBottom: spacing.lg, gap: spacing.md }}>
-        <TouchableOpacity 
-          style={styles.sandboxButton}
-          activeOpacity={0.8}
-          onPress={() => navigation.navigate('ObjectPlan')}
-        >
-          <LinearGradient
-            colors={[colors.primary, '#00A3A3']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.sandboxGradient}
-          >
-            <Text style={styles.sandboxIcon}>🏗️</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.sandboxTitle}>Room Builder Demo</Text>
-              <Text style={styles.sandboxSubtitle}>Place multiple items in AR</Text>
-            </View>
-            <Text style={styles.sandboxArrow}>→</Text>
-          </LinearGradient>
-        </TouchableOpacity>
-
-        <TouchableOpacity 
-          style={styles.sandboxButton}
-          activeOpacity={0.8}
-          onPress={() => navigation.navigate('ARRuler')}
-        >
-          <LinearGradient
-            colors={['#8E2DE2', '#4A00E0']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.sandboxGradient}
-          >
-            <Text style={styles.sandboxIcon}>📏</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.sandboxTitle, {color: '#FFF'}]}>AR Measurement Tape</Text>
-              <Text style={{color: 'rgba(255,255,255,0.7)', fontFamily: typography.fontFamily.medium, fontSize: 12, marginTop: 2}}>Linear distance & Area metrics</Text>
-            </View>
-            <Text style={[styles.sandboxArrow, {color: '#FFF'}]}>→</Text>
-          </LinearGradient>
-        </TouchableOpacity>
-      </View>
-
       {/* Content */}
       {loading ? (
         <ScrollView
@@ -332,37 +289,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     marginTop: spacing.xs,
     marginBottom: spacing.md,
-  },
-  // Sandbox Launch Button
-  sandboxButton: {
-    borderRadius: borderRadius.lg,
-    overflow: 'hidden',
-    ...shadows.md,
-  },
-  sandboxGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: spacing.md,
-    gap: spacing.md,
-  },
-  sandboxIcon: {
-    fontSize: 28,
-  },
-  sandboxTitle: {
-    color: '#000',
-    fontFamily: typography.fontFamily.bold,
-    fontSize: typography.fontSize.md,
-  },
-  sandboxSubtitle: {
-    color: 'rgba(0,0,0,0.7)',
-    fontFamily: typography.fontFamily.medium,
-    fontSize: 12,
-    marginTop: 2,
-  },
-  sandboxArrow: {
-    color: '#000',
-    fontFamily: typography.fontFamily.bold,
-    fontSize: 20,
   },
   // List
   list: {

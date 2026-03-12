@@ -12,16 +12,12 @@ import CompanySelectScreen from '../screens/CompanySelectScreen';
 import ModelListScreen from '../screens/ModelListScreen';
 import ModelDetailScreen from '../screens/ModelDetailScreen';
 import ARViewerScreen from '../screens/ARViewerScreenWrapper';
-import ObjectPlanScreen from '../screens/ObjectPlanScreenWrapper';
-import ARRulerScreen from '../screens/ARRulerScreenWrapper';
 
 export type RootStackParamList = {
   CompanySelect: undefined;
   ModelList: { companyId: string; companyName: string };
   ModelDetail: { model: any };
   ARViewer: { modelUrl: string; modelTitle: string; iosSrc?: string };
-  ObjectPlan: undefined;
-  ARRuler: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -59,8 +55,6 @@ export default function AppNavigator() {
         <Stack.Screen name="ModelList" component={ModelListScreen} />
         <Stack.Screen name="ModelDetail" component={ModelDetailScreen} />
         <Stack.Screen name="ARViewer" component={ARViewerScreen} />
-        <Stack.Screen name="ObjectPlan" component={ObjectPlanScreen} />
-        <Stack.Screen name="ARRuler" component={ARRulerScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

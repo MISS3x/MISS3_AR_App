@@ -19,8 +19,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, spacing, borderRadius, typography, shadows } from '../theme/theme';
 import * as FileSystem from 'expo-file-system/legacy';
-// expo-sharing temporarily disabled (native dep issue)
-// import * as Sharing from 'expo-sharing';
+import * as Sharing from 'expo-sharing';
 
 // Reusing base64 textures for tracker visibility
 import { crossTexture, ringTexture } from '../theme/textures';
@@ -284,6 +283,7 @@ export default function ARRulerScreen({ navigation }: any) {
         initialScene={{ scene: ARScene }} 
         viroAppProps={{ nodes, setNodes }}
         style={styles.viroContainer} 
+        occlusionMode="depthBased"
       />
       
       {/* Top Header */}
@@ -335,8 +335,10 @@ export default function ARRulerScreen({ navigation }: any) {
                try {
                   const svgString = generateAreaSVG(nodes);
                   const fileUri = `${FileSystem.documentDirectory}ar_measurement_${Date.now()}.svg`;
-                   await FileSystem.writeAsStringAsync(fileUri, svgString, { encoding: FileSystem.EncodingType.UTF8 });
-                   Alert.alert("SVG Saved", `Floor plan saved to: ${fileUri}`);
+                  await FileSystem.writeAsStringAsync(fileUri, svgString, { encoding: FileSystem.EncodingType.UTF8 });
+                  if (await Sharing.isAvailableAsync()) {
+                     await Sharing.shareAsync(fileUri, { UTI: 'public.svg-image', mimeType: 'image/svg+xml' });
+                  }
                } catch (e) {
                   Alert.alert("Error", "Could not export SVG.");
                }

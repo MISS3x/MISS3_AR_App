@@ -6,9 +6,9 @@ import {
   ViroNode, ViroDirectionalLight, ViroSpotLight, ViroQuad, ViroMaterials,
   ViroARPlaneSelector, ViroARPlane, ViroBox, ViroAnimations, ViroText
 } from '@reactvision/react-viro';
-import * as FileSystem from 'expo-file-system/legacy';
+// expo-file-system removed (crashes this native build)
 import { colors, spacing, borderRadius, typography } from '../theme/theme';
-import { crossTexture, ringTexture } from '../theme/textures';
+// Textures removed — using color-only materials
 
 ViroMaterials.createMaterials({
   clayMaterial: {
@@ -18,16 +18,12 @@ ViroMaterials.createMaterials({
     metalness: 0.1,
   },
   trackingMaterial: {
-    lightingModel: "Constant", 
-    diffuseTexture: crossTexture,
+    lightingModel: "Constant",
     blendMode: "Add",
-    diffuseColor: "rgba(0, 150, 255, 1.0)",
-    wrapS: "Repeat",
-    wrapT: "Repeat",
+    diffuseColor: "rgba(0, 255, 255, 0.2)",
   },
   ringMaterial: {
     lightingModel: "Constant",
-    diffuseTexture: ringTexture,
     blendMode: "Add",
     diffuseColor: "rgba(0, 150, 255, 1.0)"
   },
@@ -360,44 +356,14 @@ export default function ARViewerScreen({ route, navigation }: ARViewerScreenProp
   const [objectPosition, setObjectPosition] = useState<[number, number, number]>([0, 0, 0]);
   const [isPlaced, setIsPlaced] = useState(false);
 
-  // 1) Download the model from Supabase to local filesystem first
+  // Pass model URL directly to ViroReact (supports remote URLs)
   useEffect(() => {
     let isMounted = true;
-    const downloadModel = async () => {
-      try {
-        setIsLoading(true);
-        setDownloadError(null);
-
-        const fileName = modelUrl.split('?')[0].split('/').pop() || 'model.glb';
-        const localUri = `${FileSystem.documentDirectory}${fileName}`;
-
-        const FileInfo = await FileSystem.getInfoAsync(localUri);
-        if (FileInfo.exists) {
-           console.log("Model loaded from cache:", localUri);
-           if (isMounted) {
-             setLocalModelPath(`file://${localUri}`);
-             setIsLoading(false);
-           }
-           return;
-        }
-
-        console.log("Downloading model from Supabase to:", localUri);
-        const { uri } = await FileSystem.downloadAsync(modelUrl, localUri);
-        
-        if (isMounted) {
-          setLocalModelPath(`file://${uri}`);
-          setIsLoading(false);
-        }
-      } catch (err) {
-        console.error("Failed to download model for AR:", err);
-        if (isMounted) {
-          setDownloadError("Failed to download 3D model.");
-          setIsLoading(false);
-        }
-      }
-    };
-
-    downloadModel();
+    console.log("Loading model directly from URL:", modelUrl);
+    if (isMounted) {
+      setLocalModelPath(modelUrl);
+      setIsLoading(false);
+    }
     return () => { isMounted = false; };
   }, [modelUrl]);
 

@@ -23,7 +23,6 @@
     "expo-image": "^55.0.6",
     "expo-linear-gradient": "^55.0.8",
     "expo-secure-store": "^55.0.8",
-
     "expo-splash-screen": "^55.0.10",
     "expo-status-bar": "~55.0.4",
     "expo-system-ui": "~55.0.9",
@@ -41,6 +40,5 @@
     "@types/react": "~19.2.2",
     "typescript": "~5.9.2"
   },
-
   "private": true
 }

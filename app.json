@@ -51,8 +51,7 @@
           "androidXxrMode": "AR"
         }
       ],
-      "./plugins/withSceneReconstruction",
-      "./modules/lidar-mesh"
+      "./plugins/withSceneReconstruction"
     ]
   }
 }

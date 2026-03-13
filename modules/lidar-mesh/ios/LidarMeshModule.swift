@@ -12,7 +12,6 @@ public class LidarMeshModule: Module {
 
     // Get mesh slice at a given Y height
     AsyncFunction("getMeshSlice") { (cutHeight: Double) -> [[Double]] in
-      // Auto-enable on first call
       if !self.reconstructionEnabled {
         let _ = self.enableSceneReconstruction()
       }
@@ -21,7 +20,10 @@ public class LidarMeshModule: Module {
 
     // Check if LiDAR is available on this device
     Function("isLidarAvailable") { () -> Bool in
-      return ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh)
+      if #available(iOS 13.4, *) {
+        return ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh)
+      }
+      return false
     }
 
     // Get ALL mesh vertices as [x, y, z] arrays
@@ -31,51 +33,170 @@ public class LidarMeshModule: Module {
       }
       return self.extractMeshVertices(maxPoints: maxPoints)
     }
+
+    // Debug: return info about AR session and view hierarchy for troubleshooting
+    AsyncFunction("getDebugInfo") { () -> [String: Any] in
+      return self.collectDebugInfo()
+    }
   }
 
   private var reconstructionEnabled = false
+  private var cachedSession: ARSession? = nil
 
   /// Enable scene reconstruction on ViroReact's ARSession
   private func enableSceneReconstruction() -> Bool {
-    guard ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) else {
-      return false
-    }
     guard let session = findARSession() else {
       return false
     }
 
     // Get current config or create new one
     if let currentConfig = session.configuration as? ARWorldTrackingConfiguration {
-      currentConfig.sceneReconstruction = .mesh
+      // Try enabling mesh reconstruction regardless of supportsSceneReconstruction check
+      if #available(iOS 13.4, *) {
+        currentConfig.sceneReconstruction = .mesh
+      }
+      currentConfig.planeDetection = [.horizontal, .vertical]
       session.run(currentConfig)
       reconstructionEnabled = true
       return true
     }
 
-    return false
-  }
-
-  /// Find the active ARSession from ViroReact
-  private func findARSession() -> ARSession? {
-    // ViroReact stores its ARSession on the main view hierarchy
-    // We search for ARSCNView (SceneKit AR view) which holds the session
-    guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-          let window = windowScene.windows.first else {
-      return nil
+    // If no existing config, create a new one
+    let config = ARWorldTrackingConfiguration()
+    if #available(iOS 13.4, *) {
+      config.sceneReconstruction = .mesh
     }
-    return findARSCNView(in: window)?.session
+    config.planeDetection = [.horizontal, .vertical]
+    session.run(config)
+    reconstructionEnabled = true
+    return true
   }
 
-  private func findARSCNView(in view: UIView) -> ARSCNView? {
+  /// Find the active ARSession - searches broadly for any ARSCNView in the view hierarchy
+  private func findARSession() -> ARSession? {
+    // Return cached session if still valid
+    if let cached = cachedSession, cached.currentFrame != nil {
+      return cached
+    }
+
+    // Search through all connected scenes and windows
+    var arView: ARSCNView? = nil
+
+    if let windowScene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene {
+      for window in windowScene.windows {
+        if let found = findARSCNViewRecursive(in: window) {
+          arView = found
+          break
+        }
+      }
+    }
+
+    // Fallback: try ALL scenes
+    if arView == nil {
+      for scene in UIApplication.shared.connectedScenes {
+        if let windowScene = scene as? UIWindowScene {
+          for window in windowScene.windows {
+            if let found = findARSCNViewRecursive(in: window) {
+              arView = found
+              break
+            }
+          }
+        }
+        if arView != nil { break }
+      }
+    }
+
+    if let session = arView?.session {
+      cachedSession = session
+      return session
+    }
+    return nil
+  }
+
+  private func findARSCNViewRecursive(in view: UIView) -> ARSCNView? {
+    // Check if this view IS an ARSCNView (or subclass like ViroReact's VRTARSceneView)
     if let arView = view as? ARSCNView {
       return arView
     }
+    // Recurse into all subviews
     for subview in view.subviews {
-      if let found = findARSCNView(in: subview) {
+      if let found = findARSCNViewRecursive(in: subview) {
         return found
       }
     }
     return nil
+  }
+
+  /// Collect debug info about AR session state
+  private func collectDebugInfo() -> [String: Any] {
+    var info: [String: Any] = [:]
+
+    // Check device capability
+    if #available(iOS 13.4, *) {
+      info["supportsSceneReconstruction"] = ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh)
+    } else {
+      info["supportsSceneReconstruction"] = false
+      info["iosVersionTooOld"] = true
+    }
+
+    info["reconstructionEnabled"] = reconstructionEnabled
+
+    // Try to find AR session
+    let session = findARSession()
+    info["sessionFound"] = session != nil
+
+    if let session = session {
+      info["hasCurrentFrame"] = session.currentFrame != nil
+
+      if let frame = session.currentFrame {
+        let totalAnchors = frame.anchors.count
+        let meshAnchors = frame.anchors.filter { $0 is ARMeshAnchor }.count
+        let planeAnchors = frame.anchors.filter { $0 is ARPlaneAnchor }.count
+        info["totalAnchors"] = totalAnchors
+        info["meshAnchors"] = meshAnchors
+        info["planeAnchors"] = planeAnchors
+
+        // Count total mesh vertices
+        var totalVerts = 0
+        for anchor in frame.anchors {
+          if let mesh = anchor as? ARMeshAnchor {
+            totalVerts += mesh.geometry.vertices.count
+          }
+        }
+        info["totalMeshVertices"] = totalVerts
+      }
+
+      // Check config
+      if let config = session.configuration as? ARWorldTrackingConfiguration {
+        info["configType"] = "ARWorldTracking"
+        if #available(iOS 13.4, *) {
+          info["sceneReconstructionRaw"] = config.sceneReconstruction.rawValue
+          info["meshEnabled"] = config.sceneReconstruction.contains(.mesh)
+        }
+        info["planeDetection"] = config.planeDetection.rawValue
+      } else {
+        info["configType"] = String(describing: type(of: session.configuration))
+      }
+    }
+
+    // Count ARSCNViews found
+    var viewCount = 0
+    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+      for window in windowScene.windows {
+        viewCount += countARViews(in: window)
+      }
+    }
+    info["arSCNViewsFound"] = viewCount
+
+    return info
+  }
+
+  private func countARViews(in view: UIView) -> Int {
+    var count = view is ARSCNView ? 1 : 0
+    for subview in view.subviews {
+      count += countARViews(in: subview)
+    }
+    return count
   }
 
   /// Extract contour points where the LiDAR mesh intersects a horizontal plane at Y = cutHeight
@@ -114,7 +235,6 @@ public class LidarMeshModule: Module {
       let indexBuffer = faces.buffer.contents()
 
       for f in 0..<faceCount {
-        // Each face has 3 indices (triangles)
         let i0 = Int(indexBuffer.load(fromByteOffset: f * faces.bytesPerIndex * faces.indexCountPerPrimitive + 0 * faces.bytesPerIndex, as: UInt32.self))
         let i1 = Int(indexBuffer.load(fromByteOffset: f * faces.bytesPerIndex * faces.indexCountPerPrimitive + 1 * faces.bytesPerIndex, as: UInt32.self))
         let i2 = Int(indexBuffer.load(fromByteOffset: f * faces.bytesPerIndex * faces.indexCountPerPrimitive + 2 * faces.bytesPerIndex, as: UInt32.self))
@@ -125,18 +245,14 @@ public class LidarMeshModule: Module {
         let v1 = worldVertices[i1]
         let v2 = worldVertices[i2]
 
-        // Find intersection points of triangle edges with Y = cutHeight
         let edges: [(SIMD3<Float>, SIMD3<Float>)] = [(v0, v1), (v1, v2), (v2, v0)]
 
         for (a, b) in edges {
-          // Check if edge crosses the cut plane
           if (a.y - cutHeight) * (b.y - cutHeight) < 0 {
-            // Linear interpolation to find intersection point
             let t = (cutHeight - a.y) / (b.y - a.y)
             let ix = a.x + t * (b.x - a.x)
             let iz = a.z + t * (b.z - a.z)
 
-            // Snap to grid for deduplication
             let sx = round(ix / snapGrid) * snapGrid
             let sz = round(iz / snapGrid) * snapGrid
             let key = String(format: "%.2f,%.2f", sx, sz)

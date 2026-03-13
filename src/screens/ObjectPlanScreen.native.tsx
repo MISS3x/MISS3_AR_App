@@ -11,7 +11,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 
 import { colors, spacing, borderRadius, typography, shadows } from '../theme/theme';
 import { supabase } from '../lib/supabase';
-import { getMeshSlice, isLidarAvailable, getMeshVertices, enableSceneReconstruction } from '../../modules/lidar-mesh/src/index';
+import { getMeshSlice, isLidarAvailable, getMeshVertices, enableSceneReconstruction, getDebugInfo } from '../../modules/lidar-mesh/src/index';
 
 ViroMaterials.createMaterials({
   clayMaterial: {

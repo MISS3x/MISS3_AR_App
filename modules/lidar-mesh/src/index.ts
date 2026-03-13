@@ -66,3 +66,16 @@ export async function getMeshVertices(maxPoints: number = 2000): Promise<[number
     return [];
   }
 }
+
+/**
+ * Get debug info about AR session state, mesh anchors, and configuration.
+ */
+export async function getDebugInfo(): Promise<Record<string, any>> {
+  if (!LidarMesh) return { moduleLoaded: false };
+  try {
+    const info = await LidarMesh.getDebugInfo();
+    return { moduleLoaded: true, ...info };
+  } catch (e) {
+    return { moduleLoaded: true, error: String(e) };
+  }
+}

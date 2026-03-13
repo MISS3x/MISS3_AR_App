@@ -541,8 +541,13 @@ export default function SandboxARScreen({ navigation }: any) {
 
   useEffect(() => {
     fetchInventory();
-    // Check LiDAR availability
-    setHasLidar(isLidarAvailable());
+    // Try to detect LiDAR - check API support AND try enabling directly
+    const apiCheck = isLidarAvailable();
+    setHasLidar(apiCheck);
+    // Also try enabling scene reconstruction directly — some devices report false but work
+    enableSceneReconstruction().then(ok => {
+      if (ok) setHasLidar(true);
+    });
   }, []);
 
   // Poll LiDAR mesh when map is visible
@@ -883,14 +888,21 @@ export default function SandboxARScreen({ navigation }: any) {
             const planeCount = Object.keys(planes).length;
             const floorCount = Object.values(planes).filter((p: any) => p.alignment === 'Horizontal').length;
             const wallCount = Object.values(planes).filter((p: any) => p.alignment === 'Vertical').length;
-            Alert.alert(
-              "WIRE Mode",
-              `LiDAR: ${hasLidar ? '✅ Available' : '❌ Not detected'}\n` +
-              `Planes: ${planeCount} (${floorCount} floors, ${wallCount} walls)\n` +
-              `3D Mesh Points: ${meshVertices3D.length}\n` +
-              `2D Contour: ${meshContour.length} points\n\n` +
-              (hasLidar ? 'Wireframe grid + 3D point cloud active' : 'Wireframe grid active (planes only)')
-            );
+            // Force try getMeshVertices immediately for status
+            getMeshVertices(100).then(verts => {
+              Alert.alert(
+                "WIRE Mode",
+                `LiDAR API: ${hasLidar ? '✅' : '❌'}\n` +
+                `Mesh Vertices (live test): ${verts.length}\n` +
+                `Cached 3D Points: ${meshVertices3D.length}\n` +
+                `2D Contour: ${meshContour.length}\n` +
+                `Planes: ${planeCount} (${floorCount}F / ${wallCount}W)\n\n` +
+                (verts.length > 0 ? '🟢 LiDAR mesh active!' : 'Wireframe grid only (scan more surfaces)')
+              );
+              if (verts.length > 0) setHasLidar(true);
+            }).catch(() => {
+              Alert.alert("WIRE Mode", `LiDAR not responding.\nPlanes: ${planeCount}`);
+            });
           }
         }}>
           <Text style={styles.clayButtonText}>WIRE</Text>

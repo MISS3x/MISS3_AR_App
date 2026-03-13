@@ -888,20 +888,25 @@ export default function SandboxARScreen({ navigation }: any) {
             const planeCount = Object.keys(planes).length;
             const floorCount = Object.values(planes).filter((p: any) => p.alignment === 'Horizontal').length;
             const wallCount = Object.values(planes).filter((p: any) => p.alignment === 'Vertical').length;
-            // Force try getMeshVertices immediately for status
-            getMeshVertices(100).then(verts => {
-              Alert.alert(
-                "WIRE Mode",
-                `LiDAR API: ${hasLidar ? '✅' : '❌'}\n` +
-                `Mesh Vertices (live test): ${verts.length}\n` +
-                `Cached 3D Points: ${meshVertices3D.length}\n` +
-                `2D Contour: ${meshContour.length}\n` +
-                `Planes: ${planeCount} (${floorCount}F / ${wallCount}W)\n\n` +
-                (verts.length > 0 ? '🟢 LiDAR mesh active!' : 'Wireframe grid only (scan more surfaces)')
-              );
-              if (verts.length > 0) setHasLidar(true);
-            }).catch(() => {
-              Alert.alert("WIRE Mode", `LiDAR not responding.\nPlanes: ${planeCount}`);
+            // Get full debug info from native module
+            getDebugInfo().then(dbg => {
+              const lines = [
+                `Module: ${dbg.moduleLoaded ? '✅' : '❌'}`,
+                `Session: ${dbg.sessionFound ? '✅' : '❌'}`,
+                `MainThread: ${dbg.isMainThread ? '✅' : '❌'}`,
+                `ARSCNViews: ${dbg.arSCNViewsFound ?? '?'}`,
+                `Supports Mesh: ${dbg.supportsSceneReconstruction ? '✅' : '❌'}`,
+                `Mesh Enabled: ${dbg.meshEnabled ? '✅' : '❌'}`,
+                `Config: ${dbg.configType || 'none'}`,
+                `Mesh Anchors: ${dbg.meshAnchors ?? 0}`,
+                `Total Verts: ${dbg.totalMeshVertices ?? 0}`,
+                `Planes: ${planeCount} (${floorCount}F/${wallCount}W)`,
+              ];
+              if (dbg.error) lines.push(`Error: ${dbg.error}`);
+              Alert.alert("WIRE Debug", lines.join('\n'));
+              if ((dbg.totalMeshVertices ?? 0) > 0) setHasLidar(true);
+            }).catch(e => {
+              Alert.alert("WIRE Debug", `Failed: ${e}`);
             });
           }
         }}>

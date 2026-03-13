@@ -7,18 +7,19 @@ public class LidarMeshModule: Module {
 
     // Enable scene reconstruction on the active ARSession
     AsyncFunction("enableSceneReconstruction") { () -> Bool in
-      return self.enableSceneReconstruction()
+      return self.enableSceneReconstructionOnMain()
     }
 
     // Get mesh slice at a given Y height
     AsyncFunction("getMeshSlice") { (cutHeight: Double) -> [[Double]] in
       if !self.reconstructionEnabled {
-        let _ = self.enableSceneReconstruction()
+        let _ = self.enableSceneReconstructionOnMain()
       }
       return self.extractMeshSlice(atHeight: Float(cutHeight))
     }
 
     // Check if LiDAR is available on this device
+    // NOTE: Function (not AsyncFunction) runs on the main thread in ExpoModulesCore
     Function("isLidarAvailable") { () -> Bool in
       if #available(iOS 13.4, *) {
         return ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh)
@@ -29,35 +30,88 @@ public class LidarMeshModule: Module {
     // Get ALL mesh vertices as [x, y, z] arrays
     AsyncFunction("getMeshVertices") { (maxPoints: Int) -> [[Double]] in
       if !self.reconstructionEnabled {
-        let _ = self.enableSceneReconstruction()
+        let _ = self.enableSceneReconstructionOnMain()
       }
       return self.extractMeshVertices(maxPoints: maxPoints)
     }
 
     // Debug: return info about AR session and view hierarchy for troubleshooting
     AsyncFunction("getDebugInfo") { () -> [String: Any] in
-      return self.collectDebugInfo()
+      return self.collectDebugInfoOnMain()
     }
   }
 
   private var reconstructionEnabled = false
   private var cachedSession: ARSession? = nil
 
+  // MARK: - Main Thread Wrappers
+  // ExpoModulesCore AsyncFunction runs on background thread.
+  // UIKit (UIApplication, UIView hierarchy) MUST be accessed on main thread.
+  // ARSession.run() also needs main thread.
+
+  private func enableSceneReconstructionOnMain() -> Bool {
+    // If already enabled and session cached, skip main thread dance
+    if reconstructionEnabled, let cached = cachedSession, cached.currentFrame != nil {
+      return true
+    }
+
+    var result = false
+    if Thread.isMainThread {
+      result = self.enableSceneReconstruction()
+    } else {
+      DispatchQueue.main.sync {
+        result = self.enableSceneReconstruction()
+      }
+    }
+    return result
+  }
+
+  private func findARSessionThreadSafe() -> ARSession? {
+    // Return cached session if still valid (no main thread needed)
+    if let cached = cachedSession, cached.currentFrame != nil {
+      return cached
+    }
+
+    var session: ARSession? = nil
+    if Thread.isMainThread {
+      session = self.findARSessionOnMainThread()
+    } else {
+      DispatchQueue.main.sync {
+        session = self.findARSessionOnMainThread()
+      }
+    }
+    return session
+  }
+
+  private func collectDebugInfoOnMain() -> [String: Any] {
+    var info: [String: Any] = [:]
+    if Thread.isMainThread {
+      info = self.collectDebugInfo()
+    } else {
+      DispatchQueue.main.sync {
+        info = self.collectDebugInfo()
+      }
+    }
+    return info
+  }
+
+  // MARK: - Core Logic (must be called on main thread)
+
   /// Enable scene reconstruction on ViroReact's ARSession
   private func enableSceneReconstruction() -> Bool {
-    guard let session = findARSession() else {
+    guard let session = findARSessionOnMainThread() else {
       return false
     }
 
     // Get current config or create new one
     if let currentConfig = session.configuration as? ARWorldTrackingConfiguration {
-      // Try enabling mesh reconstruction regardless of supportsSceneReconstruction check
       if #available(iOS 13.4, *) {
         currentConfig.sceneReconstruction = .mesh
       }
       currentConfig.planeDetection = [.horizontal, .vertical]
       session.run(currentConfig)
       reconstructionEnabled = true
+      cachedSession = session
       return true
     }
 
@@ -69,41 +123,29 @@ public class LidarMeshModule: Module {
     config.planeDetection = [.horizontal, .vertical]
     session.run(config)
     reconstructionEnabled = true
+    cachedSession = session
     return true
   }
 
-  /// Find the active ARSession - searches broadly for any ARSCNView in the view hierarchy
-  private func findARSession() -> ARSession? {
+  /// Find the active ARSession - MUST be called on main thread
+  private func findARSessionOnMainThread() -> ARSession? {
     // Return cached session if still valid
     if let cached = cachedSession, cached.currentFrame != nil {
       return cached
     }
 
-    // Search through all connected scenes and windows
     var arView: ARSCNView? = nil
 
-    if let windowScene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene {
+    // Search through all connected scenes and windows
+    for scene in UIApplication.shared.connectedScenes {
+      guard let windowScene = scene as? UIWindowScene else { continue }
       for window in windowScene.windows {
         if let found = findARSCNViewRecursive(in: window) {
           arView = found
           break
         }
       }
-    }
-
-    // Fallback: try ALL scenes
-    if arView == nil {
-      for scene in UIApplication.shared.connectedScenes {
-        if let windowScene = scene as? UIWindowScene {
-          for window in windowScene.windows {
-            if let found = findARSCNViewRecursive(in: window) {
-              arView = found
-              break
-            }
-          }
-        }
-        if arView != nil { break }
-      }
+      if arView != nil { break }
     }
 
     if let session = arView?.session {
@@ -127,7 +169,8 @@ public class LidarMeshModule: Module {
     return nil
   }
 
-  /// Collect debug info about AR session state
+  // MARK: - Debug Info (must be called on main thread)
+
   private func collectDebugInfo() -> [String: Any] {
     var info: [String: Any] = [:]
 
@@ -140,9 +183,10 @@ public class LidarMeshModule: Module {
     }
 
     info["reconstructionEnabled"] = reconstructionEnabled
+    info["isMainThread"] = Thread.isMainThread
 
     // Try to find AR session
-    let session = findARSession()
+    let session = findARSessionOnMainThread()
     info["sessionFound"] = session != nil
 
     if let session = session {
@@ -181,9 +225,11 @@ public class LidarMeshModule: Module {
 
     // Count ARSCNViews found
     var viewCount = 0
-    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
-      for window in windowScene.windows {
-        viewCount += countARViews(in: window)
+    for scene in UIApplication.shared.connectedScenes {
+      if let windowScene = scene as? UIWindowScene {
+        for window in windowScene.windows {
+          viewCount += countARViews(in: window)
+        }
       }
     }
     info["arSCNViewsFound"] = viewCount
@@ -199,15 +245,17 @@ public class LidarMeshModule: Module {
     return count
   }
 
+  // MARK: - Mesh Extraction (thread-safe via cached session)
+
   /// Extract contour points where the LiDAR mesh intersects a horizontal plane at Y = cutHeight
   private func extractMeshSlice(atHeight cutHeight: Float) -> [[Double]] {
-    guard let session = findARSession(),
+    guard let session = findARSessionThreadSafe(),
           let frame = session.currentFrame else {
       return []
     }
 
     var contourPoints: [[Double]] = []
-    let snapGrid: Float = 0.05 // 5cm snap grid
+    let snapGrid: Float = 0.05
     var seenKeys = Set<String>()
 
     for anchor in frame.anchors {
@@ -218,7 +266,6 @@ public class LidarMeshModule: Module {
       let faces = geometry.faces
       let transform = meshAnchor.transform
 
-      // Get vertex positions in world space
       let vertexCount = vertices.count
       var worldVertices = [SIMD3<Float>]()
       worldVertices.reserveCapacity(vertexCount)
@@ -230,7 +277,6 @@ public class LidarMeshModule: Module {
         worldVertices.append(SIMD3<Float>(worldVec.x, worldVec.y, worldVec.z))
       }
 
-      // For each triangle face, check if it intersects the Y = cutHeight plane
       let faceCount = faces.count
       let indexBuffer = faces.buffer.contents()
 
@@ -271,13 +317,13 @@ public class LidarMeshModule: Module {
 
   /// Extract ALL mesh vertices as [x, y, z] world-coordinate arrays
   private func extractMeshVertices(maxPoints: Int) -> [[Double]] {
-    guard let session = findARSession(),
+    guard let session = findARSessionThreadSafe(),
           let frame = session.currentFrame else {
       return []
     }
 
     var points: [[Double]] = []
-    let stride = max(1, 5) // subsample every 5th vertex for performance
+    let stride = max(1, 5)
 
     for anchor in frame.anchors {
       guard let meshAnchor = anchor as? ARMeshAnchor else { continue }

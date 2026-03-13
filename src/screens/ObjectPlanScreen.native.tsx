@@ -692,13 +692,40 @@ export default function SandboxARScreen({ navigation }: any) {
                 return fillRows;
               })()}
 
-              {/* Wall contour points — bright cyan pixel dots */}
+              {/* Pixel outline — connect wall points with pixel dots */}
+              {chain.length >= 2 && (() => {
+                const outlinePixels: React.ReactNode[] = [];
+                const pxStep = 4; // pixel spacing
+                for (let ci = 0; ci < chain.length; ci++) {
+                  const a = chain[ci], b = chain[(ci + 1) % chain.length];
+                  const ax = snap(toX(allPoints[a][0])), ay = snap(toY(allPoints[a][1]));
+                  const bx = snap(toX(allPoints[b][0])), by = snap(toY(allPoints[b][1]));
+                  const dx = bx - ax, dy = by - ay;
+                  const dist = Math.sqrt(dx*dx + dy*dy);
+                  const steps = Math.max(1, Math.floor(dist / pxStep));
+                  for (let s = 0; s <= steps; s++) {
+                    const t = s / steps;
+                    const px = snap(ax + dx * t);
+                    const py = snap(ay + dy * t);
+                    outlinePixels.push(
+                      <View key={`ol-${ci}-${s}`} style={{
+                        position: 'absolute', left: px - 2, top: py - 2,
+                        width: 4, height: 4,
+                        backgroundColor: '#00e5e5',
+                      }} />
+                    );
+                  }
+                }
+                return outlinePixels;
+              })()}
+
+              {/* Wall scan points — brighter pixels at detected positions */}
               {allPoints.map(([x, z], i) => (
                 <View key={`sp-${i}`} style={{
                   position: 'absolute',
                   left: snap(toX(x)) - 3, top: snap(toY(z)) - 3,
                   width: 6, height: 6,
-                  backgroundColor: '#00e5e5',
+                  backgroundColor: '#00ffff',
                 }} />
               ))}
 

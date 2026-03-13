@@ -630,6 +630,19 @@ export default function SandboxARScreen({ navigation }: any) {
         }}
         style={styles.viroContainer} 
         occlusionMode="depthBased"
+        worldMeshEnabled={showWire}
+        worldMeshConfig={{
+          stride: 2,
+          minConfidence: 0.2,
+          maxDepth: 5.0,
+          updateIntervalMs: 100,
+          debugDrawEnabled: true,
+        }}
+        onWorldMeshUpdated={(stats: any) => {
+          if (stats && stats.vertexCount > 0) {
+            setHasLidar(true);
+          }
+        }}
       />
 
       {/* 2D FLOOR PLAN — Wall segments + floor fill */}

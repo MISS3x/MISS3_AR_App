@@ -5,21 +5,12 @@ public class LidarMeshModule: Module {
   public func definition() -> ModuleDefinition {
     Name("LidarMesh")
 
-    // Enable scene reconstruction on the active ARSession
-    AsyncFunction("enableSceneReconstruction") { () -> Bool in
-      return self.enableSceneReconstructionOnMain()
+    // Simple test to verify module loads
+    Function("ping") { () -> String in
+      return "LidarMesh module loaded OK"
     }
 
-    // Get mesh slice at a given Y height
-    AsyncFunction("getMeshSlice") { (cutHeight: Double) -> [[Double]] in
-      if !self.reconstructionEnabled {
-        let _ = self.enableSceneReconstructionOnMain()
-      }
-      return self.extractMeshSlice(atHeight: Float(cutHeight))
-    }
-
-    // Check if LiDAR is available on this device
-    // NOTE: Function (not AsyncFunction) runs on the main thread in ExpoModulesCore
+    // Check LiDAR hardware support
     Function("isLidarAvailable") { () -> Bool in
       if #available(iOS 13.4, *) {
         return ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh)
@@ -27,321 +18,198 @@ public class LidarMeshModule: Module {
       return false
     }
 
-    // Get ALL mesh vertices as [x, y, z] arrays
-    AsyncFunction("getMeshVertices") { (maxPoints: Int) -> [[Double]] in
-      if !self.reconstructionEnabled {
-        let _ = self.enableSceneReconstructionOnMain()
-      }
-      return self.extractMeshVertices(maxPoints: maxPoints)
+    // Enable scene reconstruction on ViroReact's AR session
+    AsyncFunction("enableSceneReconstruction") { () -> [String: Any] in
+      return self.enableMeshOnMain()
     }
 
-    // Debug: return info about AR session and view hierarchy for troubleshooting
-    AsyncFunction("getDebugInfo") { () -> [String: Any] in
-      return self.collectDebugInfoOnMain()
+    // Get mesh wireframe data from ARMeshAnchors
+    AsyncFunction("getMeshWireframe") { (maxVertices: Int) -> [String: Any] in
+      return self.getMeshWireframeOnMain(maxVertices: maxVertices)
     }
   }
 
-  private var reconstructionEnabled = false
   private var cachedSession: ARSession? = nil
 
   // MARK: - Main Thread Wrappers
-  // ExpoModulesCore AsyncFunction runs on background thread.
-  // UIKit (UIApplication, UIView hierarchy) MUST be accessed on main thread.
-  // ARSession.run() also needs main thread.
 
-  private func enableSceneReconstructionOnMain() -> Bool {
-    // If already enabled and session cached, skip main thread dance
-    if reconstructionEnabled, let cached = cachedSession, cached.currentFrame != nil {
-      return true
+  private func enableMeshOnMain() -> [String: Any] {
+    var result: [String: Any] = [:]
+    let work = {
+      result = self.doEnableSceneReconstruction()
     }
-
-    var result = false
-    if Thread.isMainThread {
-      result = self.enableSceneReconstruction()
-    } else {
-      DispatchQueue.main.sync {
-        result = self.enableSceneReconstruction()
-      }
-    }
+    if Thread.isMainThread { work() } else { DispatchQueue.main.sync { work() } }
     return result
   }
 
-  private func findARSessionThreadSafe() -> ARSession? {
-    // Return cached session if still valid (no main thread needed)
+  private func getMeshWireframeOnMain(maxVertices: Int) -> [String: Any] {
+    var result: [String: Any] = [:]
+    let work = {
+      result = self.doGetMeshWireframe(maxVertices: maxVertices)
+    }
+    if Thread.isMainThread { work() } else { DispatchQueue.main.sync { work() } }
+    return result
+  }
+
+  // MARK: - Find ARSession from ViroReact
+
+  private func findARSession() -> ARSession? {
     if let cached = cachedSession, cached.currentFrame != nil {
       return cached
     }
 
-    var session: ARSession? = nil
-    if Thread.isMainThread {
-      session = self.findARSessionOnMainThread()
-    } else {
-      DispatchQueue.main.sync {
-        session = self.findARSessionOnMainThread()
-      }
-    }
-    return session
-  }
-
-  private func collectDebugInfoOnMain() -> [String: Any] {
-    var info: [String: Any] = [:]
-    if Thread.isMainThread {
-      info = self.collectDebugInfo()
-    } else {
-      DispatchQueue.main.sync {
-        info = self.collectDebugInfo()
-      }
-    }
-    return info
-  }
-
-  // MARK: - Core Logic (must be called on main thread)
-
-  /// Enable scene reconstruction on ViroReact's ARSession
-  private func enableSceneReconstruction() -> Bool {
-    guard let session = findARSessionOnMainThread() else {
-      return false
-    }
-
-    // Get current config or create new one
-    if let currentConfig = session.configuration as? ARWorldTrackingConfiguration {
-      if #available(iOS 13.4, *) {
-        currentConfig.sceneReconstruction = .mesh
-      }
-      currentConfig.planeDetection = [.horizontal, .vertical]
-      session.run(currentConfig)
-      reconstructionEnabled = true
-      cachedSession = session
-      return true
-    }
-
-    // If no existing config, create a new one
-    let config = ARWorldTrackingConfiguration()
-    if #available(iOS 13.4, *) {
-      config.sceneReconstruction = .mesh
-    }
-    config.planeDetection = [.horizontal, .vertical]
-    session.run(config)
-    reconstructionEnabled = true
-    cachedSession = session
-    return true
-  }
-
-  /// Find the active ARSession - MUST be called on main thread
-  private func findARSessionOnMainThread() -> ARSession? {
-    // Return cached session if still valid
-    if let cached = cachedSession, cached.currentFrame != nil {
-      return cached
-    }
-
-    var arView: ARSCNView? = nil
-
-    // Search through all connected scenes and windows
     for scene in UIApplication.shared.connectedScenes {
-      guard let windowScene = scene as? UIWindowScene else { continue }
-      for window in windowScene.windows {
-        if let found = findARSCNViewRecursive(in: window) {
-          arView = found
-          break
+      guard let ws = scene as? UIWindowScene else { continue }
+      for window in ws.windows {
+        if let arView = findARSCNView(in: window) {
+          cachedSession = arView.session
+          return arView.session
         }
       }
-      if arView != nil { break }
-    }
-
-    if let session = arView?.session {
-      cachedSession = session
-      return session
     }
     return nil
   }
 
-  private func findARSCNViewRecursive(in view: UIView) -> ARSCNView? {
-    // Check if this view IS an ARSCNView (or subclass like ViroReact's VRTARSceneView)
-    if let arView = view as? ARSCNView {
-      return arView
-    }
-    // Recurse into all subviews
-    for subview in view.subviews {
-      if let found = findARSCNViewRecursive(in: subview) {
-        return found
-      }
+  private func findARSCNView(in view: UIView) -> ARSCNView? {
+    if let arView = view as? ARSCNView { return arView }
+    for sub in view.subviews {
+      if let found = findARSCNView(in: sub) { return found }
     }
     return nil
   }
 
-  // MARK: - Debug Info (must be called on main thread)
+  // MARK: - Enable Scene Reconstruction
 
-  private func collectDebugInfo() -> [String: Any] {
-    var info: [String: Any] = [:]
+  private func doEnableSceneReconstruction() -> [String: Any] {
+    var info: [String: Any] = ["isMainThread": Thread.isMainThread]
 
-    // Check device capability
-    if #available(iOS 13.4, *) {
-      info["supportsSceneReconstruction"] = ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh)
-    } else {
-      info["supportsSceneReconstruction"] = false
-      info["iosVersionTooOld"] = true
-    }
-
-    info["reconstructionEnabled"] = reconstructionEnabled
-    info["isMainThread"] = Thread.isMainThread
-
-    // Try to find AR session
-    let session = findARSessionOnMainThread()
-    info["sessionFound"] = session != nil
-
-    if let session = session {
-      info["hasCurrentFrame"] = session.currentFrame != nil
-
-      if let frame = session.currentFrame {
-        let totalAnchors = frame.anchors.count
-        let meshAnchors = frame.anchors.filter { $0 is ARMeshAnchor }.count
-        let planeAnchors = frame.anchors.filter { $0 is ARPlaneAnchor }.count
-        info["totalAnchors"] = totalAnchors
-        info["meshAnchors"] = meshAnchors
-        info["planeAnchors"] = planeAnchors
-
-        // Count total mesh vertices
-        var totalVerts = 0
-        for anchor in frame.anchors {
-          if let mesh = anchor as? ARMeshAnchor {
-            totalVerts += mesh.geometry.vertices.count
+    guard let session = findARSession() else {
+      info["error"] = "No ARSession found"
+      info["sessionFound"] = false
+      
+      // Count ARSCNViews for debugging
+      var viewCount = 0
+      for scene in UIApplication.shared.connectedScenes {
+        if let ws = scene as? UIWindowScene {
+          for window in ws.windows {
+            viewCount += countARViews(in: window)
           }
         }
-        info["totalMeshVertices"] = totalVerts
       }
+      info["arSCNViewCount"] = viewCount
+      return info
+    }
 
-      // Check config
-      if let config = session.configuration as? ARWorldTrackingConfiguration {
-        info["configType"] = "ARWorldTracking"
-        if #available(iOS 13.4, *) {
-          info["sceneReconstructionRaw"] = config.sceneReconstruction.rawValue
-          info["meshEnabled"] = config.sceneReconstruction.contains(.mesh)
+    info["sessionFound"] = true
+
+    if #available(iOS 13.4, *) {
+      let supports = ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh)
+      info["supportsMesh"] = supports
+
+      if supports {
+        let config = ARWorldTrackingConfiguration()
+        config.sceneReconstruction = .mesh
+        config.planeDetection = [.horizontal, .vertical]
+
+        if ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
+          config.frameSemantics.insert(.sceneDepth)
         }
-        info["planeDetection"] = config.planeDetection.rawValue
+
+        session.run(config, options: [])
+        info["meshEnabled"] = true
       } else {
-        info["configType"] = String(describing: type(of: session.configuration))
+        info["meshEnabled"] = false
       }
+    } else {
+      info["supportsMesh"] = false
+      info["meshEnabled"] = false
     }
-
-    // Count ARSCNViews found
-    var viewCount = 0
-    for scene in UIApplication.shared.connectedScenes {
-      if let windowScene = scene as? UIWindowScene {
-        for window in windowScene.windows {
-          viewCount += countARViews(in: window)
-        }
-      }
-    }
-    info["arSCNViewsFound"] = viewCount
 
     return info
+  }
+
+  // MARK: - Get Mesh Wireframe from ARMeshAnchors
+
+  private func doGetMeshWireframe(maxVertices: Int) -> [String: Any] {
+    guard let session = findARSession(),
+          let frame = session.currentFrame else {
+      return ["vertices": [], "indices": [], "anchors": 0]
+    }
+
+    var allVertices: [[Double]] = []  // [x, y, z] world coordinates
+    var allEdges: [[Int]] = []        // [v1, v2] index pairs for wireframe lines
+    var anchorCount = 0
+    var vertexOffset = 0
+
+    for anchor in frame.anchors {
+      guard let meshAnchor = anchor as? ARMeshAnchor else { continue }
+      anchorCount += 1
+
+      let geo = meshAnchor.geometry
+      let transform = meshAnchor.transform
+      let vCount = geo.vertices.count
+      let fCount = geo.faces.count
+
+      // Transform vertices to world space
+      for i in 0..<vCount {
+        if allVertices.count >= maxVertices { break }
+        let v = geo.vertices[i]
+        let local = SIMD4<Float>(v[0], v[1], v[2], 1.0)
+        let world = transform * local
+        allVertices.append([Double(world.x), Double(world.y), Double(world.z)])
+      }
+
+      let addedVerts = min(vCount, maxVertices - (vertexOffset))
+      if addedVerts <= 0 { break }
+
+      // Extract edges from triangle faces (each face = 3 edges)
+      let indexBuf = geo.faces.buffer.contents()
+      let bytesPerIndex = geo.faces.bytesPerIndex
+
+      for f in 0..<fCount {
+        let base = f * 3 * bytesPerIndex
+        let i0: Int
+        let i1: Int
+        let i2: Int
+
+        if bytesPerIndex == 4 {
+          i0 = Int(indexBuf.load(fromByteOffset: base, as: UInt32.self))
+          i1 = Int(indexBuf.load(fromByteOffset: base + 4, as: UInt32.self))
+          i2 = Int(indexBuf.load(fromByteOffset: base + 8, as: UInt32.self))
+        } else {
+          i0 = Int(indexBuf.load(fromByteOffset: base, as: UInt16.self))
+          i1 = Int(indexBuf.load(fromByteOffset: base + 2, as: UInt16.self))
+          i2 = Int(indexBuf.load(fromByteOffset: base + 4, as: UInt16.self))
+        }
+
+        // Only add edges where both vertices are in range
+        if i0 < addedVerts && i1 < addedVerts {
+          allEdges.append([i0 + vertexOffset, i1 + vertexOffset])
+        }
+        if i1 < addedVerts && i2 < addedVerts {
+          allEdges.append([i1 + vertexOffset, i2 + vertexOffset])
+        }
+        if i2 < addedVerts && i0 < addedVerts {
+          allEdges.append([i2 + vertexOffset, i0 + vertexOffset])
+        }
+      }
+
+      vertexOffset += addedVerts
+      if allVertices.count >= maxVertices { break }
+    }
+
+    return [
+      "vertices": allVertices,
+      "edges": allEdges,
+      "anchors": anchorCount,
+      "totalVertices": allVertices.count,
+      "totalEdges": allEdges.count
+    ]
   }
 
   private func countARViews(in view: UIView) -> Int {
-    var count = view is ARSCNView ? 1 : 0
-    for subview in view.subviews {
-      count += countARViews(in: subview)
-    }
-    return count
-  }
-
-  // MARK: - Mesh Extraction (thread-safe via cached session)
-
-  /// Extract contour points where the LiDAR mesh intersects a horizontal plane at Y = cutHeight
-  private func extractMeshSlice(atHeight cutHeight: Float) -> [[Double]] {
-    guard let session = findARSessionThreadSafe(),
-          let frame = session.currentFrame else {
-      return []
-    }
-
-    var contourPoints: [[Double]] = []
-    let snapGrid: Float = 0.05
-    var seenKeys = Set<String>()
-
-    for anchor in frame.anchors {
-      guard let meshAnchor = anchor as? ARMeshAnchor else { continue }
-
-      let geometry = meshAnchor.geometry
-      let vertices = geometry.vertices
-      let faces = geometry.faces
-      let transform = meshAnchor.transform
-
-      let vertexCount = vertices.count
-      var worldVertices = [SIMD3<Float>]()
-      worldVertices.reserveCapacity(vertexCount)
-
-      for i in 0..<vertexCount {
-        let localPos = vertices[i]
-        let localVec = SIMD4<Float>(localPos[0], localPos[1], localPos[2], 1.0)
-        let worldVec = transform * localVec
-        worldVertices.append(SIMD3<Float>(worldVec.x, worldVec.y, worldVec.z))
-      }
-
-      let faceCount = faces.count
-      let indexBuffer = faces.buffer.contents()
-
-      for f in 0..<faceCount {
-        let i0 = Int(indexBuffer.load(fromByteOffset: f * faces.bytesPerIndex * faces.indexCountPerPrimitive + 0 * faces.bytesPerIndex, as: UInt32.self))
-        let i1 = Int(indexBuffer.load(fromByteOffset: f * faces.bytesPerIndex * faces.indexCountPerPrimitive + 1 * faces.bytesPerIndex, as: UInt32.self))
-        let i2 = Int(indexBuffer.load(fromByteOffset: f * faces.bytesPerIndex * faces.indexCountPerPrimitive + 2 * faces.bytesPerIndex, as: UInt32.self))
-
-        guard i0 < worldVertices.count, i1 < worldVertices.count, i2 < worldVertices.count else { continue }
-
-        let v0 = worldVertices[i0]
-        let v1 = worldVertices[i1]
-        let v2 = worldVertices[i2]
-
-        let edges: [(SIMD3<Float>, SIMD3<Float>)] = [(v0, v1), (v1, v2), (v2, v0)]
-
-        for (a, b) in edges {
-          if (a.y - cutHeight) * (b.y - cutHeight) < 0 {
-            let t = (cutHeight - a.y) / (b.y - a.y)
-            let ix = a.x + t * (b.x - a.x)
-            let iz = a.z + t * (b.z - a.z)
-
-            let sx = round(ix / snapGrid) * snapGrid
-            let sz = round(iz / snapGrid) * snapGrid
-            let key = String(format: "%.2f,%.2f", sx, sz)
-
-            if !seenKeys.contains(key) {
-              seenKeys.insert(key)
-              contourPoints.append([Double(sx), Double(sz)])
-            }
-          }
-        }
-      }
-    }
-
-    return contourPoints
-  }
-
-  /// Extract ALL mesh vertices as [x, y, z] world-coordinate arrays
-  private func extractMeshVertices(maxPoints: Int) -> [[Double]] {
-    guard let session = findARSessionThreadSafe(),
-          let frame = session.currentFrame else {
-      return []
-    }
-
-    var points: [[Double]] = []
-    let stride = max(1, 5)
-
-    for anchor in frame.anchors {
-      guard let meshAnchor = anchor as? ARMeshAnchor else { continue }
-
-      let vertices = meshAnchor.geometry.vertices
-      let transform = meshAnchor.transform
-      let vertexCount = vertices.count
-
-      for i in Swift.stride(from: 0, to: vertexCount, by: stride) {
-        let localPos = vertices[i]
-        let localVec = SIMD4<Float>(localPos[0], localPos[1], localPos[2], 1.0)
-        let worldVec = transform * localVec
-        points.append([Double(worldVec.x), Double(worldVec.y), Double(worldVec.z)])
-
-        if points.count >= maxPoints { return points }
-      }
-    }
-
-    return points
+    var c = view is ARSCNView ? 1 : 0
+    for s in view.subviews { c += countARViews(in: s) }
+    return c
   }
 }

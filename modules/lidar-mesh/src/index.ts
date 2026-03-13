@@ -1,34 +1,29 @@
-import { Platform } from 'expo-modules-core';
+import { requireNativeModule } from 'expo-modules-core';
 
-// Try to load native module — wrapped in try-catch to prevent crash if module isn't compiled
-let LidarMesh: any = null;
-try {
-  if (Platform.OS === 'ios') {
-    const { requireNativeModule } = require('expo-modules-core');
-    LidarMesh = requireNativeModule('LidarMesh');
-  }
-} catch (e) {
-  console.warn('[LidarMesh] Native module not available — falling back to plane-based rendering');
-}
-
-/**
- * Get mesh contour points at the given height (Y plane slice).
- * Returns array of [x, z] world-coordinate points where LiDAR mesh intersects the horizontal plane.
- * Only works on iOS devices with LiDAR sensor.
- */
-export async function getMeshSlice(cutHeight: number = 1.0): Promise<[number, number][]> {
-  if (!LidarMesh) return [];
+const LidarMesh = (() => {
   try {
-    return await LidarMesh.getMeshSlice(cutHeight);
+    return requireNativeModule('LidarMesh');
+  } catch {
+    return null;
+  }
+})();
+
+/** Check if this module loaded successfully */
+export function isModuleLoaded(): boolean {
+  return LidarMesh !== null;
+}
+
+/** Simple ping to verify module is alive */
+export function ping(): string {
+  if (!LidarMesh) return 'Module not loaded';
+  try {
+    return LidarMesh.ping();
   } catch (e) {
-    console.warn('[LidarMesh] getMeshSlice failed:', e);
-    return [];
+    return `ping error: ${e}`;
   }
 }
 
-/**
- * Check if the current device has LiDAR capability.
- */
+/** Check if device has LiDAR */
 export function isLidarAvailable(): boolean {
   if (!LidarMesh) return false;
   try {
@@ -38,43 +33,49 @@ export function isLidarAvailable(): boolean {
   }
 }
 
-/**
- * Force-enable scene reconstruction (LiDAR mesh scanning).
- * Returns true if successfully enabled.
- */
-export async function enableSceneReconstruction(): Promise<boolean> {
-  if (!LidarMesh) return false;
+/** Enable ARKit scene reconstruction (.mesh) on the active AR session */
+export async function enableSceneReconstruction(): Promise<Record<string, any>> {
+  if (!LidarMesh) return { error: 'Module not loaded' };
   try {
     return await LidarMesh.enableSceneReconstruction();
   } catch (e) {
-    console.warn('[LidarMesh] enableSceneReconstruction failed:', e);
-    return false;
+    return { error: String(e) };
   }
 }
 
-/**
- * Get full 3D mesh vertices from LiDAR scan.
- * Returns array of [x, y, z] world-coordinate points.
- * maxPoints limits output for performance (default 2000).
+/** Get wireframe mesh data from ARMeshAnchors
+ * Returns { vertices: [[x,y,z],...], edges: [[v1,v2],...], anchors, totalVertices, totalEdges }
  */
-export async function getMeshVertices(maxPoints: number = 2000): Promise<[number, number, number][]> {
-  if (!LidarMesh) return [];
+export async function getMeshWireframe(maxVertices: number = 5000): Promise<{
+  vertices: [number, number, number][];
+  edges: [number, number][];
+  anchors: number;
+  totalVertices: number;
+  totalEdges: number;
+}> {
+  if (!LidarMesh) return { vertices: [], edges: [], anchors: 0, totalVertices: 0, totalEdges: 0 };
   try {
-    return await LidarMesh.getMeshVertices(maxPoints);
+    return await LidarMesh.getMeshWireframe(maxVertices);
   } catch (e) {
-    console.warn('[LidarMesh] getMeshVertices failed:', e);
-    return [];
+    console.warn('[LidarMesh] getMeshWireframe failed:', e);
+    return { vertices: [], edges: [], anchors: 0, totalVertices: 0, totalEdges: 0 };
   }
 }
 
-/**
- * Get debug info about AR session state, mesh anchors, and configuration.
- */
+// Legacy exports for backward compatibility
+export async function getMeshSlice(cutHeight: number): Promise<[number, number][]> {
+  return [];
+}
+
+export async function getMeshVertices(maxPoints: number = 2000): Promise<[number, number, number][]> {
+  return [];
+}
+
 export async function getDebugInfo(): Promise<Record<string, any>> {
   if (!LidarMesh) return { moduleLoaded: false };
   try {
-    const info = await LidarMesh.getDebugInfo();
-    return { moduleLoaded: true, ...info };
+    const result = await LidarMesh.enableSceneReconstruction();
+    return { moduleLoaded: true, ...result };
   } catch (e) {
     return { moduleLoaded: true, error: String(e) };
   }

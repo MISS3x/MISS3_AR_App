@@ -185,8 +185,8 @@ const ARNodeComponent = ({ obj, index, setPlacedObjects, arSceneRef }: { obj: AR
     // 1. Update position state for 2D map tracking by explicitly matching the unique ID, 
     // avoiding stale index closures when multiple identical objects are spawned.
     setPlacedObjects((prev: ARPlacedObject[]) => {
-      return prev.map(p => 
-        p.id === obj.id ? { ...p, position: [dragToPos[0], dragToPos[1], dragToPos[2]] } : p
+      return prev.map(p =>
+        p.id === obj.id ? { ...p, position: [dragToPos[0], dragToPos[1], dragToPos[2]] as [number, number, number] } : p
       );
     });
 
@@ -293,12 +293,17 @@ const ARScene = (props: any) => {
           const scaleArgs = pendingModelContext.model_transform?.scale;
           const parsedScale: [number, number, number] = scaleArgs ? [scaleArgs.x, scaleArgs.y, scaleArgs.z] : [1, 1, 1];
 
+          // Snap Y to floor level — find lowest horizontal plane Y
+          const floorY = Object.values(planes).reduce((best: number, p: any) => {
+            if (p.position && p.alignment === 'Horizontal' && p.position[1] < 0.3) return Math.min(best, p.position[1]);
+            return best;
+          }, position[1]);
+
           const newObject: ARPlacedObject = {
             id: Math.random().toString(36).substring(7),
             title: pendingModelContext.title || 'Model',
             localUri: pendingModelContext.localUri,
-            // Use exact X and Z from the tap intersection!
-            position: [position[0], position[1], position[2]],
+            position: [position[0], floorY, position[2]],
             scale: parsedScale,
             rotation: [0, 0, 0],
             yOffset: 0,
@@ -737,7 +742,7 @@ export default function SandboxARScreen({ navigation }: any) {
               onPress={() => {
                  try {
                     const svgString = generateFloorPlanSVG(placedObjects, planes);
-                                        Alert.alert("Floor Plan", `Area: ${estimatedArea.toFixed(1)}m²\nPerimeter: ${totalPerimeter.toFixed(1)}m\n${allPoints.length} points (${dataSource})\n${placedObjects.length} objects`);
+                    Alert.alert("Floor Plan", `${placedObjects.length} objects placed\nWalls: ${Object.values(planes).filter((p: any) => p.alignment === 'Vertical').length}`);
                  } catch (e) {
                     Alert.alert("Export Failed", "Could not generate floor plan data.");
                  }

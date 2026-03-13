@@ -400,34 +400,8 @@ const ARScene = (props: any) => {
         );
       })}
 
-      {/* Wireframe grid over detected surfaces */}
-      {showWire && Object.values(planes).map((p: any) => {
-        const w = p.width || 1;
-        const h = p.height || 1;
-        const lineW = 0.015; // 1.5cm thin lines
-        const gridStep = 0.25; // 25cm grid
-        const edges: React.ReactNode[] = [];
-        // 4 edge outlines
-        edges.push(<ViroQuad key="et" position={[0, 0.001, h/2]} rotation={[-90,0,0]} width={w} height={lineW} materials={["wireMaterial"]} />);
-        edges.push(<ViroQuad key="eb" position={[0, 0.001, -h/2]} rotation={[-90,0,0]} width={w} height={lineW} materials={["wireMaterial"]} />);
-        edges.push(<ViroQuad key="el" position={[-w/2, 0.001, 0]} rotation={[-90,0,0]} width={lineW} height={h} materials={["wireMaterial"]} />);
-        edges.push(<ViroQuad key="er" position={[w/2, 0.001, 0]} rotation={[-90,0,0]} width={lineW} height={h} materials={["wireMaterial"]} />);
-        // Internal grid X lines
-        for (let gx = -Math.floor(w/(2*gridStep)); gx <= Math.floor(w/(2*gridStep)); gx++) {
-          if (gx === 0) continue;
-          edges.push(<ViroQuad key={`gx${gx}`} position={[gx*gridStep, 0.001, 0]} rotation={[-90,0,0]} width={lineW*0.5} height={h} materials={["wireMaterial"]} />);
-        }
-        // Internal grid Z lines
-        for (let gz = -Math.floor(h/(2*gridStep)); gz <= Math.floor(h/(2*gridStep)); gz++) {
-          if (gz === 0) continue;
-          edges.push(<ViroQuad key={`gz${gz}`} position={[0, 0.001, gz*gridStep]} rotation={[-90,0,0]} width={w} height={lineW*0.5} materials={["wireMaterial"]} />);
-        }
-        return (
-          <ViroARPlane key={`wire-${p.anchorId}`} anchorId={p.anchorId}>
-            {edges}
-          </ViroARPlane>
-        );
-      })}
+      {/* World mesh from ViroReact handles WIRE visualization now */}
+
 
       {rings.map(r => (
         <ViroNode key={r.id} position={r.position}>
@@ -521,6 +495,7 @@ export default function SandboxARScreen({ navigation }: any) {
   const [catalogModels, setCatalogModels] = useState<CatalogModel[]>([]);
   const [loadingCatalog, setLoadingCatalog] = useState(false);
   const [downloadingModelId, setDownloadingModelId] = useState<string | null>(null);
+  const [meshStats, setMeshStats] = useState<{vertexCount: number; triangleCount: number; averageConfidence: number} | null>(null);
 
   // Fetch catalog from all companies to populate the Sandbox inventory
   const fetchInventory = async () => {
@@ -639,8 +614,9 @@ export default function SandboxARScreen({ navigation }: any) {
           debugDrawEnabled: true,
         }}
         onWorldMeshUpdated={(stats: any) => {
-          if (stats && stats.vertexCount > 0) {
-            setHasLidar(true);
+          if (stats) {
+            setMeshStats(stats);
+            if (stats.vertexCount > 0) setHasLidar(true);
           }
         }}
       />
@@ -903,26 +879,13 @@ export default function SandboxARScreen({ navigation }: any) {
             const planeCount = Object.keys(planes).length;
             const floorCount = Object.values(planes).filter((p: any) => p.alignment === 'Horizontal').length;
             const wallCount = Object.values(planes).filter((p: any) => p.alignment === 'Vertical').length;
-            // Get full debug info from native module
-            getDebugInfo().then(dbg => {
-              const lines = [
-                `Module: ${dbg.moduleLoaded ? '✅' : '❌'}`,
-                `Session: ${dbg.sessionFound ? '✅' : '❌'}`,
-                `MainThread: ${dbg.isMainThread ? '✅' : '❌'}`,
-                `ARSCNViews: ${dbg.arSCNViewsFound ?? '?'}`,
-                `Supports Mesh: ${dbg.supportsSceneReconstruction ? '✅' : '❌'}`,
-                `Mesh Enabled: ${dbg.meshEnabled ? '✅' : '❌'}`,
-                `Config: ${dbg.configType || 'none'}`,
-                `Mesh Anchors: ${dbg.meshAnchors ?? 0}`,
-                `Total Verts: ${dbg.totalMeshVertices ?? 0}`,
-                `Planes: ${planeCount} (${floorCount}F/${wallCount}W)`,
-              ];
-              if (dbg.error) lines.push(`Error: ${dbg.error}`);
-              Alert.alert("WIRE Debug", lines.join('\n'));
-              if ((dbg.totalMeshVertices ?? 0) > 0) setHasLidar(true);
-            }).catch(e => {
-              Alert.alert("WIRE Debug", `Failed: ${e}`);
-            });
+            const ms = meshStats;
+            Alert.alert("WIRE Mesh", [
+              `Vertices: ${ms?.vertexCount ?? 0}`,
+              `Triangles: ${ms?.triangleCount ?? 0}`,
+              `Confidence: ${ms ? (ms.averageConfidence * 100).toFixed(0) + '%' : 'N/A'}`,
+              `Planes: ${planeCount} (${floorCount}F/${wallCount}W)`,
+            ].join('\n'));
           }
         }}>
           <Text style={styles.clayButtonText}>WIRE</Text>

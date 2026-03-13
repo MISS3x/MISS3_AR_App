@@ -381,6 +381,35 @@ const ARScene = (props: any) => {
         );
       })}
 
+      {/* Wireframe grid over detected surfaces */}
+      {showWire && Object.values(planes).map((p: any) => {
+        const w = p.width || 1;
+        const h = p.height || 1;
+        const lineW = 0.015; // 1.5cm thin lines
+        const gridStep = 0.25; // 25cm grid
+        const edges: React.ReactNode[] = [];
+        // 4 edge outlines
+        edges.push(<ViroQuad key="et" position={[0, 0.001, h/2]} rotation={[-90,0,0]} width={w} height={lineW} materials={["wireMaterial"]} />);
+        edges.push(<ViroQuad key="eb" position={[0, 0.001, -h/2]} rotation={[-90,0,0]} width={w} height={lineW} materials={["wireMaterial"]} />);
+        edges.push(<ViroQuad key="el" position={[-w/2, 0.001, 0]} rotation={[-90,0,0]} width={lineW} height={h} materials={["wireMaterial"]} />);
+        edges.push(<ViroQuad key="er" position={[w/2, 0.001, 0]} rotation={[-90,0,0]} width={lineW} height={h} materials={["wireMaterial"]} />);
+        // Internal grid X lines
+        for (let gx = -Math.floor(w/(2*gridStep)); gx <= Math.floor(w/(2*gridStep)); gx++) {
+          if (gx === 0) continue;
+          edges.push(<ViroQuad key={`gx${gx}`} position={[gx*gridStep, 0.001, 0]} rotation={[-90,0,0]} width={lineW*0.5} height={h} materials={["wireMaterial"]} />);
+        }
+        // Internal grid Z lines
+        for (let gz = -Math.floor(h/(2*gridStep)); gz <= Math.floor(h/(2*gridStep)); gz++) {
+          if (gz === 0) continue;
+          edges.push(<ViroQuad key={`gz${gz}`} position={[0, 0.001, gz*gridStep]} rotation={[-90,0,0]} width={w} height={lineW*0.5} materials={["wireMaterial"]} />);
+        }
+        return (
+          <ViroARPlane key={`wire-${p.anchorId}`} anchorId={p.anchorId}>
+            {edges}
+          </ViroARPlane>
+        );
+      })}
+
       {rings.map(r => (
         <ViroNode key={r.id} position={r.position}>
           <ViroQuad 

@@ -521,31 +521,50 @@ export default function SandboxARScreen({ navigation }: any) {
         occlusionMode="depthBased"
       />
 
-      {/* 2D FLOOR PLAN — LiDAR mesh contour + plane fallback */}
+      {/* 2D FLOOR PLAN — Wall segments + floor fill */}
       {showMap && (() => {
-        // Use LiDAR contour if available, else fall back to wall plane centers
+        // Separate wall and floor planes
         const wallPlanes = Object.values(planes).filter((p: any) =>
           p.position && p.alignment === 'Vertical'
         );
+        const floorPlanes = Object.values(planes).filter((p: any) =>
+          p.position && p.alignment === 'Horizontal' && p.position[1] < 0.3
+        );
         
-        // Primary: LiDAR mesh contour; Fallback: wall plane centers
-        const allPoints: [number, number][] = meshContour.length > 0
-          ? [...meshContour]
-          : wallPlanes.map((p: any) => [p.position[0], p.position[2]] as [number, number]);
+        // Compute wall segment endpoints from rotation + width
+        const wallSegments: { x1: number; z1: number; x2: number; z2: number; w: number }[] = [];
+        wallPlanes.forEach((p: any) => {
+          const cx = p.position[0], cz = p.position[2];
+          const halfW = (p.width || 1) / 2;
+          // Wall rotation around Y axis — use p.rotation[1] (yaw in degrees)
+          const yawDeg = p.rotation ? p.rotation[1] : 0;
+          const yawRad = (yawDeg * Math.PI) / 180;
+          // Endpoints perpendicular to wall normal
+          const dx = Math.cos(yawRad) * halfW;
+          const dz = Math.sin(yawRad) * halfW;
+          wallSegments.push({ x1: cx - dx, z1: cz - dz, x2: cx + dx, z2: cz + dz, w: p.width || 1 });
+        });
         
-        // Calculate bounds
+        // Calculate bounds from wall endpoints + floor planes + objects
         let minX = -2, maxX = 2, minZ = -2, maxZ = 2;
-        allPoints.forEach(([x, z]) => {
-          if (x < minX) minX = x;
-          if (x > maxX) maxX = x;
-          if (z < minZ) minZ = z;
-          if (z > maxZ) maxZ = z;
+        wallSegments.forEach(s => {
+          minX = Math.min(minX, s.x1, s.x2);
+          maxX = Math.max(maxX, s.x1, s.x2);
+          minZ = Math.min(minZ, s.z1, s.z2);
+          maxZ = Math.max(maxZ, s.z1, s.z2);
+        });
+        floorPlanes.forEach((p: any) => {
+          const hw = (p.width || 1) / 2, hh = (p.height || 1) / 2;
+          minX = Math.min(minX, p.position[0] - hw);
+          maxX = Math.max(maxX, p.position[0] + hw);
+          minZ = Math.min(minZ, p.position[2] - hh);
+          maxZ = Math.max(maxZ, p.position[2] + hh);
         });
         placedObjects.forEach(obj => {
-          if (obj.position[0] < minX) minX = obj.position[0] - 0.5;
-          if (obj.position[0] > maxX) maxX = obj.position[0] + 0.5;
-          if (obj.position[2] < minZ) minZ = obj.position[2] - 0.5;
-          if (obj.position[2] > maxZ) maxZ = obj.position[2] + 0.5;
+          minX = Math.min(minX, obj.position[0] - 0.5);
+          maxX = Math.max(maxX, obj.position[0] + 0.5);
+          minZ = Math.min(minZ, obj.position[2] - 0.5);
+          maxZ = Math.max(maxZ, obj.position[2] + 0.5);
         });
         
         minX -= 0.5; maxX += 0.5; minZ -= 0.5; maxZ += 0.5;
@@ -560,61 +579,17 @@ export default function SandboxARScreen({ navigation }: any) {
         const toX = (x: number) => oX + (x - minX) * scale;
         const toY = (z: number) => oY + (z - minZ) * scale;
         const toW = (w: number) => w * scale;
-        const snap = (v: number) => Math.round(v / 4) * 4;
+        const snap = (v: number) => Math.round(v / 2) * 2;
         const gridStep = 1;
         
-        // TSP nearest-neighbor chain → closed polygon
-        const chain: number[] = [];
-        if (allPoints.length >= 3) {
-          const visited = new Set<number>();
-          chain.push(0);
-          visited.add(0);
-          while (chain.length < allPoints.length) {
-            const last = chain[chain.length - 1];
-            let nearestDist = Infinity;
-            let nearestJ = -1;
-            for (let j = 0; j < allPoints.length; j++) {
-              if (visited.has(j)) continue;
-              const dx = allPoints[last][0] - allPoints[j][0];
-              const dz = allPoints[last][1] - allPoints[j][1];
-              const dist = Math.sqrt(dx*dx + dz*dz);
-              if (dist < nearestDist) { nearestDist = dist; nearestJ = j; }
-            }
-            if (nearestJ >= 0) { chain.push(nearestJ); visited.add(nearestJ); }
-            else break;
-          }
-        }
-        
-        // Build closed loop connections
-        const connections: { x1: number; y1: number; x2: number; y2: number }[] = [];
-        for (let i = 0; i < chain.length; i++) {
-          const a = chain[i], b = chain[(i + 1) % chain.length];
-          connections.push({
-            x1: toX(allPoints[a][0]), y1: toY(allPoints[a][1]),
-            x2: toX(allPoints[b][0]), y2: toY(allPoints[b][1]),
-          });
-        }
-        
-        // Perimeter (meters)
-        let totalPerimeter = 0;
-        for (let i = 0; i < chain.length; i++) {
-          const a = chain[i], b = chain[(i + 1) % chain.length];
-          const dx = allPoints[a][0] - allPoints[b][0];
-          const dz = allPoints[a][1] - allPoints[b][1];
-          totalPerimeter += Math.sqrt(dx*dx + dz*dz);
-        }
-        
-        // Area (Shoelace formula)
+        // Stats
         let estimatedArea = 0;
-        if (chain.length >= 3) {
-          for (let i = 0; i < chain.length; i++) {
-            const a = chain[i], b = chain[(i + 1) % chain.length];
-            estimatedArea += allPoints[a][0] * allPoints[b][1];
-            estimatedArea -= allPoints[b][0] * allPoints[a][1];
-          }
-          estimatedArea = Math.abs(estimatedArea) / 2;
-        }
-        
+        floorPlanes.forEach((p: any) => {
+          estimatedArea += (p.width || 1) * (p.height || 1);
+        });
+        let totalPerimeter = 0;
+        wallSegments.forEach(s => { totalPerimeter += s.w; });
+        const wallCount = wallSegments.length;
         const dataSource = meshContour.length > 0 ? 'LIDAR' : 'PLANES';
 
         return (
@@ -630,8 +605,8 @@ export default function SandboxARScreen({ navigation }: any) {
                <Text style={{ color: '#00e5e5', fontSize: 14, fontWeight: '700' }}>{totalPerimeter.toFixed(1)} m</Text>
              </View>
              <View style={{ backgroundColor: 'rgba(0,0,0,0.7)', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 5 }}>
-               <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 8, fontWeight: '700', letterSpacing: 1 }}>{dataSource}</Text>
-               <Text style={{ color: '#FF6B00', fontSize: 14, fontWeight: '700' }}>{allPoints.length} pts</Text>
+               <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 8, fontWeight: '700', letterSpacing: 1 }}>WALLS</Text>
+               <Text style={{ color: '#FF6B00', fontSize: 14, fontWeight: '700' }}>{wallCount}</Text>
              </View>
            </View>
 
@@ -659,77 +634,51 @@ export default function SandboxARScreen({ navigation }: any) {
                 return <View key={`gy-${i}`} style={{ position: 'absolute', left: 0, top: snap(py), width: mapW, height: 1, backgroundColor: 'rgba(0,255,255,0.03)' }} />;
               })}
 
-              {/* Polygon interior fill — scanline rows */}
-              {chain.length >= 3 && (() => {
-                // Get polygon vertices in screen coords
-                const polyPts = chain.map(idx => ({ x: snap(toX(allPoints[idx][0])), y: snap(toY(allPoints[idx][1])) }));
-                const ys = polyPts.map(p => p.y);
-                const minPY = Math.max(0, Math.min(...ys));
-                const maxPY = Math.min(mapH, Math.max(...ys));
-                const fillRows: React.ReactNode[] = [];
-                const step = 4; // 4px rows for performance
-                for (let row = minPY; row <= maxPY; row += step) {
-                  // Find intersections with polygon edges
-                  const intersections: number[] = [];
-                  for (let i = 0; i < polyPts.length; i++) {
-                    const a = polyPts[i], b = polyPts[(i + 1) % polyPts.length];
-                    if ((a.y <= row && b.y > row) || (b.y <= row && a.y > row)) {
-                      const t = (row - a.y) / (b.y - a.y);
-                      intersections.push(a.x + t * (b.x - a.x));
-                    }
-                  }
-                  intersections.sort((a, b) => a - b);
-                  for (let j = 0; j < intersections.length - 1; j += 2) {
-                    const left = snap(intersections[j]);
-                    const right = snap(intersections[j + 1]);
-                    if (right > left) {
-                      fillRows.push(
-                        <View key={`fill-${row}-${j}`} style={{
-                          position: 'absolute', left, top: row,
-                          width: right - left, height: step,
-                          backgroundColor: 'rgba(0, 180, 180, 0.12)',
-                        }} />
-                      );
-                    }
-                  }
-                }
-                return fillRows;
-              })()}
+              {/* Floor plane rectangles — teal fill */}
+              {floorPlanes.map((p: any, i: number) => {
+                const pw = toW(p.width || 1);
+                const ph = toW(p.height || 1);
+                return (
+                  <View key={`floor-${i}`} style={{
+                    position: 'absolute',
+                    left: snap(toX(p.position[0]) - pw / 2),
+                    top: snap(toY(p.position[2]) - ph / 2),
+                    width: Math.max(pw, 2), height: Math.max(ph, 2),
+                    backgroundColor: 'rgba(0, 180, 180, 0.15)',
+                  }} />
+                );
+              })}
 
-              {/* Pixel outline — connect wall points with pixel dots */}
-              {chain.length >= 2 && (() => {
-                const outlinePixels: React.ReactNode[] = [];
-                const pxStep = 4; // pixel spacing
-                for (let ci = 0; ci < chain.length; ci++) {
-                  const a = chain[ci], b = chain[(ci + 1) % chain.length];
-                  const ax = snap(toX(allPoints[a][0])), ay = snap(toY(allPoints[a][1]));
-                  const bx = snap(toX(allPoints[b][0])), by = snap(toY(allPoints[b][1]));
-                  const dx = bx - ax, dy = by - ay;
-                  const dist = Math.sqrt(dx*dx + dy*dy);
-                  const steps = Math.max(1, Math.floor(dist / pxStep));
-                  for (let s = 0; s <= steps; s++) {
-                    const t = s / steps;
-                    const px = snap(ax + dx * t);
-                    const py = snap(ay + dy * t);
-                    outlinePixels.push(
-                      <View key={`ol-${ci}-${s}`} style={{
-                        position: 'absolute', left: px - 2, top: py - 2,
-                        width: 4, height: 4,
-                        backgroundColor: '#00e5e5',
-                      }} />
-                    );
-                  }
+              {/* Wall segments — thick pixel lines */}
+              {wallSegments.map((seg, si) => {
+                const pixels: React.ReactNode[] = [];
+                const ax = snap(toX(seg.x1)), ay = snap(toY(seg.z1));
+                const bx = snap(toX(seg.x2)), by = snap(toY(seg.z2));
+                const dx = bx - ax, dy = by - ay;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                const steps = Math.max(1, Math.floor(dist / 3));
+                for (let s = 0; s <= steps; s++) {
+                  const t = s / steps;
+                  const px = snap(ax + dx * t);
+                  const py = snap(ay + dy * t);
+                  pixels.push(
+                    <View key={`w-${si}-${s}`} style={{
+                      position: 'absolute', left: px - 3, top: py - 3,
+                      width: 6, height: 6,
+                      backgroundColor: '#00e5e5',
+                    }} />
+                  );
                 }
-                return outlinePixels;
-              })()}
+                return pixels;
+              })}
 
-              {/* Wall scan points — brighter pixels at detected positions */}
-              {allPoints.map(([x, z], i) => (
-                <View key={`sp-${i}`} style={{
+              {/* LiDAR mesh contour dots (when available) */}
+              {meshContour.length > 0 && meshContour.map(([x, z], i) => (
+                <View key={`li-${i}`} style={{
                   position: 'absolute',
-                  left: snap(toX(x)) - 3, top: snap(toY(z)) - 3,
-                  width: 6, height: 6,
-                  backgroundColor: '#00ffff',
+                  left: snap(toX(x)) - 2, top: snap(toY(z)) - 2,
+                  width: 4, height: 4,
+                  backgroundColor: 'rgba(0, 255, 200, 0.6)',
                 }} />
               ))}
 

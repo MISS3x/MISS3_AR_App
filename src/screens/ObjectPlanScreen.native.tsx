@@ -11,7 +11,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 
 import { colors, spacing, borderRadius, typography, shadows } from '../theme/theme';
 import { supabase } from '../lib/supabase';
-import { getMeshSlice, isLidarAvailable } from '../../modules/lidar-mesh/src/index';
+import { getMeshSlice, isLidarAvailable, getMeshVertices } from '../../modules/lidar-mesh/src/index';
 
 ViroMaterials.createMaterials({
   clayMaterial: {
@@ -29,6 +29,11 @@ ViroMaterials.createMaterials({
     lightingModel: "Constant",
     blendMode: "Add",
     diffuseColor: "rgba(0, 255, 255, 0.0)"
+  },
+  wireMaterial: {
+    lightingModel: "Constant",
+    blendMode: "Add",
+    diffuseColor: "rgba(0, 255, 200, 0.8)"
   }
 });
 
@@ -275,7 +280,7 @@ const ARScene = (props: any) => {
      placedObjects, setPlacedObjects, 
      showMesh, planes, setPlanes,
      pendingModelContext, setPendingModelContext,
-     meshContour, showWire
+     meshContour, meshVertices3D, showWire
   } = props.sceneNavigator.viroAppProps;
   
   const [rings, setRings] = useState<{ id: number; position: [number, number, number] }[]>([]);
@@ -400,12 +405,20 @@ const ARScene = (props: any) => {
         <ARNodeComponent key={obj.id} obj={obj} index={i} setPlacedObjects={setPlacedObjects} arSceneRef={arSceneRef} />
       ))}
 
-      {/* LiDAR mesh contour points — 3D visualization */}
-      {showWire && meshContour && meshContour.map(([x, z]: [number, number], i: number) => (
+      {/* LiDAR mesh — 3D point cloud */}
+      {showWire && meshVertices3D && meshVertices3D.length > 0 && meshVertices3D.map(([x, y, z]: [number, number, number], i: number) => (
         <ViroBox key={`wire-${i}`}
+          position={[x, y, z]}
+          width={0.02} height={0.02} length={0.02}
+          materials={["wireMaterial"]}
+        />
+      ))}
+      {/* Fallback: meshContour 2D at Y=1m */}
+      {showWire && (!meshVertices3D || meshVertices3D.length === 0) && meshContour && meshContour.length > 0 && meshContour.map(([x, z]: [number, number], i: number) => (
+        <ViroBox key={`wire2d-${i}`}
           position={[x, 1.0, z]}
-          width={0.03} height={0.03} length={0.03}
-          materials={["ringMaterial"]}
+          width={0.02} height={0.02} length={0.02}
+          materials={["wireMaterial"]}
         />
       ))}
     </ViroARScene>
@@ -426,7 +439,25 @@ export default function SandboxARScreen({ navigation }: any) {
   
   // LiDAR mesh contour points [x, z]
   const [meshContour, setMeshContour] = useState<[number, number][]>([]);
+  const [meshVertices3D, setMeshVertices3D] = useState<[number, number, number][]>([]);
   const [hasLidar, setHasLidar] = useState(false);
+
+  // Poll for 3D mesh vertices when WIRE is active
+  useEffect(() => {
+    if (!showWire || !hasLidar) return;
+    let alive = true;
+    const poll = async () => {
+      while (alive) {
+        try {
+          const verts = await getMeshVertices(2000);
+          if (alive) setMeshVertices3D(verts as [number, number, number][]);
+        } catch {}
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    };
+    poll();
+    return () => { alive = false; };
+  }, [showWire, hasLidar]);
   
   // Hoisted state for Wall and Floor detection from ARKit
   const [planes, setPlanes] = useState<{[key: string]: any}>({});
@@ -537,7 +568,7 @@ export default function SandboxARScreen({ navigation }: any) {
            placedObjects, setPlacedObjects, 
            showMesh, planes, setPlanes,
            pendingModelContext, setPendingModelContext,
-           meshContour, showWire
+           meshContour, meshVertices3D, showWire
         }}
         style={styles.viroContainer} 
         occlusionMode="depthBased"

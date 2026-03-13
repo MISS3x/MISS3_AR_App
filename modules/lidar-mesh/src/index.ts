@@ -37,3 +37,18 @@ export function isLidarAvailable(): boolean {
     return false;
   }
 }
+
+/**
+ * Get full 3D mesh vertices from LiDAR scan.
+ * Returns array of [x, y, z] world-coordinate points.
+ * maxPoints limits output for performance (default 2000).
+ */
+export async function getMeshVertices(maxPoints: number = 2000): Promise<[number, number, number][]> {
+  if (!LidarMesh) return [];
+  try {
+    return await LidarMesh.getMeshVertices(maxPoints);
+  } catch (e) {
+    console.warn('[LidarMesh] getMeshVertices failed:', e);
+    return [];
+  }
+}

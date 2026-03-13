@@ -23,6 +23,14 @@ public class LidarMeshModule: Module {
     Function("isLidarAvailable") { () -> Bool in
       return ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh)
     }
+
+    // Get ALL mesh vertices as [x, y, z] arrays
+    AsyncFunction("getMeshVertices") { (maxPoints: Int) -> [[Double]] in
+      if !self.reconstructionEnabled {
+        let _ = self.enableSceneReconstruction()
+      }
+      return self.extractMeshVertices(maxPoints: maxPoints)
+    }
   }
 
   private var reconstructionEnabled = false
@@ -143,5 +151,35 @@ public class LidarMeshModule: Module {
     }
 
     return contourPoints
+  }
+
+  /// Extract ALL mesh vertices as [x, y, z] world-coordinate arrays
+  private func extractMeshVertices(maxPoints: Int) -> [[Double]] {
+    guard let session = findARSession(),
+          let frame = session.currentFrame else {
+      return []
+    }
+
+    var points: [[Double]] = []
+    let stride = max(1, 5) // subsample every 5th vertex for performance
+
+    for anchor in frame.anchors {
+      guard let meshAnchor = anchor as? ARMeshAnchor else { continue }
+
+      let vertices = meshAnchor.geometry.vertices
+      let transform = meshAnchor.transform
+      let vertexCount = vertices.count
+
+      for i in Swift.stride(from: 0, to: vertexCount, by: stride) {
+        let localPos = vertices[i]
+        let localVec = SIMD4<Float>(localPos[0], localPos[1], localPos[2], 1.0)
+        let worldVec = transform * localVec
+        points.append([Double(worldVec.x), Double(worldVec.y), Double(worldVec.z)])
+
+        if points.count >= maxPoints { return points }
+      }
+    }
+
+    return points
   }
 }

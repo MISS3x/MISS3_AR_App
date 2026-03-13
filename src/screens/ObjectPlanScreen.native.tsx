@@ -284,34 +284,39 @@ const ARScene = (props: any) => {
   const lastTapTime = useRef<number>(0);
 
   const handleSceneClick = (position: number[], source: any) => {
-    // Only spawn a ring if we tapped empty space (i.e. floor) rather than an object
     if (position && position.length === 3) {
-       const now = Date.now();
-       const isDoubleTap = (now - lastTapTime.current) < 400;
-       lastTapTime.current = now;
 
-       if (isDoubleTap && pendingModelContext) {
-          const scaleArgs = pendingModelContext.model_transform?.scale;
-          const parsedScale: [number, number, number] = scaleArgs ? [scaleArgs.x, scaleArgs.y, scaleArgs.z] : [1, 1, 1];
+       if (pendingModelContext) {
+          // Collision check — don't place if too close to existing object
+          const minDist = 0.3; // 30cm minimum distance
+          const tooClose = placedObjects.some((obj: ARPlacedObject) => {
+            const dx = obj.position[0] - position[0];
+            const dz = obj.position[2] - position[2];
+            return Math.sqrt(dx*dx + dz*dz) < minDist;
+          });
 
-          // Snap Y to floor level — find lowest horizontal plane Y
-          const floorY = Object.values(planes).reduce((best: number, p: any) => {
-            if (p.position && p.alignment === 'Horizontal' && p.position[1] < 0.3) return Math.min(best, p.position[1]);
-            return best;
-          }, position[1]);
+          if (!tooClose) {
+            const scaleArgs = pendingModelContext.model_transform?.scale;
+            const parsedScale: [number, number, number] = scaleArgs ? [scaleArgs.x, scaleArgs.y, scaleArgs.z] : [1, 1, 1];
 
-          const newObject: ARPlacedObject = {
-            id: Math.random().toString(36).substring(7),
-            title: pendingModelContext.title || 'Model',
-            localUri: pendingModelContext.localUri,
-            position: [position[0], floorY, position[2]],
-            scale: parsedScale,
-            rotation: [0, 0, 0],
-            yOffset: 0,
-          };
-          
-          setPlacedObjects((prev: any) => [...prev, newObject]);
-          // Keep model selected for multi-place
+            // Snap Y to floor level
+            const floorY = Object.values(planes).reduce((best: number, p: any) => {
+              if (p.position && p.alignment === 'Horizontal' && p.position[1] < 0.3) return Math.min(best, p.position[1]);
+              return best;
+            }, position[1]);
+
+            const newObject: ARPlacedObject = {
+              id: Math.random().toString(36).substring(7),
+              title: pendingModelContext.title || 'Model',
+              localUri: pendingModelContext.localUri,
+              position: [position[0], floorY, position[2]],
+              scale: parsedScale,
+              rotation: [0, 0, 0],
+              yOffset: 0,
+            };
+            
+            setPlacedObjects((prev: any) => [...prev, newObject]);
+          }
        }
 
        const id = Date.now();
@@ -769,7 +774,13 @@ export default function SandboxARScreen({ navigation }: any) {
       {/* Tap-To-Place Prompt */}
       {pendingModelContext && (
          <View style={styles.promptOverlay}>
-            <Text style={styles.promptText}>Tap a surface to place {pendingModelContext.title}</Text>
+            <Text style={styles.promptText}>Tap floor to place {pendingModelContext.title}</Text>
+            <TouchableOpacity 
+              onPress={() => setPendingModelContext(null)} 
+              style={{ marginLeft: 12, backgroundColor: 'rgba(255,60,60,0.8)', borderRadius: 14, width: 28, height: 28, alignItems: 'center', justifyContent: 'center' }}
+            >
+              <Text style={{ color: '#FFF', fontSize: 16, fontWeight: '700' }}>✕</Text>
+            </TouchableOpacity>
          </View>
       )}
 

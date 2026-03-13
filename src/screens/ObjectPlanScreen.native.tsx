@@ -280,12 +280,16 @@ const ARScene = (props: any) => {
   const [rings, setRings] = useState<{ id: number; position: [number, number, number] }[]>([]);
   const lastAnchorUpdate = useRef<number>(0);
   const arSceneRef = useRef<any>(null);
+  const lastTapTime = useRef<number>(0);
 
   const handleSceneClick = (position: number[], source: any) => {
     // Only spawn a ring if we tapped empty space (i.e. floor) rather than an object
     if (position && position.length === 3) {
-       
-       if (pendingModelContext) {
+       const now = Date.now();
+       const isDoubleTap = (now - lastTapTime.current) < 400;
+       lastTapTime.current = now;
+
+       if (isDoubleTap && pendingModelContext) {
           const scaleArgs = pendingModelContext.model_transform?.scale;
           const parsedScale: [number, number, number] = scaleArgs ? [scaleArgs.x, scaleArgs.y, scaleArgs.z] : [1, 1, 1];
 

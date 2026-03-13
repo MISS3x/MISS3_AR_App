@@ -855,7 +855,23 @@ export default function SandboxARScreen({ navigation }: any) {
         <TouchableOpacity style={[styles.clayButton, showMesh && styles.clayButtonActive]} onPress={() => setShowMesh(!showMesh)}>
           <Text style={styles.clayButtonText}>MESH</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.clayButton, showWire && styles.clayButtonActive]} onPress={() => setShowWire(!showWire)}>
+        <TouchableOpacity style={[styles.clayButton, showWire && styles.clayButtonActive]} onPress={() => {
+          const newState = !showWire;
+          setShowWire(newState);
+          if (newState) {
+            const planeCount = Object.keys(planes).length;
+            const floorCount = Object.values(planes).filter((p: any) => p.alignment === 'Horizontal').length;
+            const wallCount = Object.values(planes).filter((p: any) => p.alignment === 'Vertical').length;
+            Alert.alert(
+              "WIRE Mode",
+              `LiDAR: ${hasLidar ? '✅ Available' : '❌ Not detected'}\n` +
+              `Planes: ${planeCount} (${floorCount} floors, ${wallCount} walls)\n` +
+              `3D Mesh Points: ${meshVertices3D.length}\n` +
+              `2D Contour: ${meshContour.length} points\n\n` +
+              (hasLidar ? 'Wireframe grid + 3D point cloud active' : 'Wireframe grid active (planes only)')
+            );
+          }
+        }}>
           <Text style={styles.clayButtonText}>WIRE</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[styles.clayButton, showMap && styles.clayButtonActive]} onPress={() => setShowMap(!showMap)}>

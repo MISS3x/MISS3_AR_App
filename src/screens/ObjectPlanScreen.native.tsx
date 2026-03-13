@@ -290,46 +290,63 @@ const ARScene = (props: any) => {
   const lastTapTime = useRef<number>(0);
 
   const handleSceneClick = (position: number[], source: any) => {
-    if (position && position.length === 3) {
+    if (!position || position.length !== 3) return;
 
-       if (pendingModelContext) {
-          // Collision check — don't place if too close to existing object
-          const minDist = 0.3; // 30cm minimum distance
-          const tooClose = placedObjects.some((obj: ARPlacedObject) => {
-            const dx = obj.position[0] - position[0];
-            const dz = obj.position[2] - position[2];
-            return Math.sqrt(dx*dx + dz*dz) < minDist;
-          });
+    // Only place objects when a model is pending (user selected from catalog)
+    if (!pendingModelContext) return;
 
-          if (!tooClose) {
-            const scaleArgs = pendingModelContext.model_transform?.scale;
-            const parsedScale: [number, number, number] = scaleArgs ? [scaleArgs.x, scaleArgs.y, scaleArgs.z] : [1, 1, 1];
+    // Hit-test: verify tap landed on a horizontal floor plane
+    if (arSceneRef && arSceneRef.current) {
+      arSceneRef.current.performARHitTestWithPosition(position).then((results: any) => {
+        if (!results || results.length === 0) return;
 
-            // Snap Y to floor level
-            const floorY = Object.values(planes).reduce((best: number, p: any) => {
-              if (p.position && p.alignment === 'Horizontal' && p.position[1] < 0.3) return Math.min(best, p.position[1]);
-              return best;
-            }, position[1]);
+        // Find first horizontal surface hit
+        const floorHit = results.find((hit: any) => {
+          if (!hit.transform || !hit.transform.rotation) return false;
+          const rot = hit.transform.rotation;
+          // Floor is mostly flat: X and Z rotation near 0 (< 20 degrees)
+          return Math.abs(rot[0]) < 20 && Math.abs(rot[2]) < 20;
+        });
 
-            const newObject: ARPlacedObject = {
-              id: Math.random().toString(36).substring(7),
-              title: pendingModelContext.title || 'Model',
-              localUri: pendingModelContext.localUri,
-              position: [position[0], floorY, position[2]],
-              scale: parsedScale,
-              rotation: [0, 0, 0],
-              yOffset: 0,
-            };
-            
-            setPlacedObjects((prev: any) => [...prev, newObject]);
-          }
-       }
+        if (!floorHit) return; // Didn't hit a floor — ignore
 
-       const id = Date.now();
-       setRings((prev: any) => [...prev, { id, position: [position[0], position[1], position[2]] }]);
-       setTimeout(() => {
+        const hitPos = floorHit.transform.position || position;
+
+        // Collision check — don't place if gizmo overlaps (30cm min distance)
+        const minDist = 0.3;
+        const tooClose = placedObjects.some((obj: ARPlacedObject) => {
+          const dx = obj.position[0] - hitPos[0];
+          const dz = obj.position[2] - hitPos[2];
+          return Math.sqrt(dx*dx + dz*dz) < minDist;
+        });
+
+        if (tooClose) return;
+
+        const scaleArgs = pendingModelContext.model_transform?.scale;
+        const parsedScale: [number, number, number] = scaleArgs ? [scaleArgs.x, scaleArgs.y, scaleArgs.z] : [1, 1, 1];
+
+        const newObject: ARPlacedObject = {
+          id: Math.random().toString(36).substring(7),
+          title: pendingModelContext.title || 'Model',
+          localUri: pendingModelContext.localUri,
+          position: [hitPos[0], hitPos[1], hitPos[2]],
+          scale: parsedScale,
+          rotation: [0, 0, 0],
+          yOffset: 0,
+        };
+
+        setPlacedObjects((prev: any) => [...prev, newObject]);
+
+        // Clear pending so it's single-placement only
+        setPendingModelContext(null);
+
+        // Ring confirmation on successful placement
+        const id = Date.now();
+        setRings((prev: any) => [...prev, { id, position: [hitPos[0], hitPos[1], hitPos[2]] }]);
+        setTimeout(() => {
           setRings((prev: any) => prev.filter((r: any) => r.id !== id));
-       }, 1000);
+        }, 1000);
+      }).catch(() => {});
     }
   };
 

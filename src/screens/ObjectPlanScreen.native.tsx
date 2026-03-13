@@ -301,7 +301,7 @@ const ARScene = (props: any) => {
           };
           
           setPlacedObjects((prev: any) => [...prev, newObject]);
-          setPendingModelContext(null);
+          // Keep model selected for multi-place
        }
 
        const id = Date.now();
@@ -655,29 +655,49 @@ export default function SandboxARScreen({ navigation }: any) {
                 return <View key={`gy-${i}`} style={{ position: 'absolute', left: 0, top: snap(py), width: mapW, height: 1, backgroundColor: 'rgba(0,255,255,0.03)' }} />;
               })}
 
-              {/* Closed polygon connection lines */}
-              {connections.map((c, i) => {
-                const dx = c.x2 - c.x1, dy = c.y2 - c.y1;
-                const len = Math.sqrt(dx*dx + dy*dy);
-                const angle = Math.atan2(dy, dx) * 180 / Math.PI;
-                return (
-                  <View key={`conn-${i}`} style={{
-                    position: 'absolute',
-                    left: snap(c.x1), top: snap(c.y1) - 1.5,
-                    width: Math.max(len, 2), height: 3,
-                    backgroundColor: '#00e5e5',
-                    transformOrigin: 'left center',
-                    transform: [{ rotate: `${angle}deg` }],
-                  }} />
-                );
-              })}
+              {/* Polygon interior fill — scanline rows */}
+              {chain.length >= 3 && (() => {
+                // Get polygon vertices in screen coords
+                const polyPts = chain.map(idx => ({ x: snap(toX(allPoints[idx][0])), y: snap(toY(allPoints[idx][1])) }));
+                const ys = polyPts.map(p => p.y);
+                const minPY = Math.max(0, Math.min(...ys));
+                const maxPY = Math.min(mapH, Math.max(...ys));
+                const fillRows: React.ReactNode[] = [];
+                const step = 4; // 4px rows for performance
+                for (let row = minPY; row <= maxPY; row += step) {
+                  // Find intersections with polygon edges
+                  const intersections: number[] = [];
+                  for (let i = 0; i < polyPts.length; i++) {
+                    const a = polyPts[i], b = polyPts[(i + 1) % polyPts.length];
+                    if ((a.y <= row && b.y > row) || (b.y <= row && a.y > row)) {
+                      const t = (row - a.y) / (b.y - a.y);
+                      intersections.push(a.x + t * (b.x - a.x));
+                    }
+                  }
+                  intersections.sort((a, b) => a - b);
+                  for (let j = 0; j < intersections.length - 1; j += 2) {
+                    const left = snap(intersections[j]);
+                    const right = snap(intersections[j + 1]);
+                    if (right > left) {
+                      fillRows.push(
+                        <View key={`fill-${row}-${j}`} style={{
+                          position: 'absolute', left, top: row,
+                          width: right - left, height: step,
+                          backgroundColor: 'rgba(0, 180, 180, 0.12)',
+                        }} />
+                      );
+                    }
+                  }
+                }
+                return fillRows;
+              })()}
 
-              {/* Contour points — bright cyan dots */}
+              {/* Wall contour points — bright cyan pixel dots */}
               {allPoints.map(([x, z], i) => (
                 <View key={`sp-${i}`} style={{
                   position: 'absolute',
-                  left: snap(toX(x)) - 2, top: snap(toY(z)) - 2,
-                  width: 4, height: 4, borderRadius: 2,
+                  left: snap(toX(x)) - 3, top: snap(toY(z)) - 3,
+                  width: 6, height: 6,
                   backgroundColor: '#00e5e5',
                 }} />
               ))}

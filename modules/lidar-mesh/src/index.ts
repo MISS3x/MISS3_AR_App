@@ -39,6 +39,20 @@ export function isLidarAvailable(): boolean {
 }
 
 /**
+ * Force-enable scene reconstruction (LiDAR mesh scanning).
+ * Returns true if successfully enabled.
+ */
+export async function enableSceneReconstruction(): Promise<boolean> {
+  if (!LidarMesh) return false;
+  try {
+    return await LidarMesh.enableSceneReconstruction();
+  } catch (e) {
+    console.warn('[LidarMesh] enableSceneReconstruction failed:', e);
+    return false;
+  }
+}
+
+/**
  * Get full 3D mesh vertices from LiDAR scan.
  * Returns array of [x, y, z] world-coordinate points.
  * maxPoints limits output for performance (default 2000).

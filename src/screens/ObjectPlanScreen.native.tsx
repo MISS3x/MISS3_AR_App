@@ -11,7 +11,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 
 import { colors, spacing, borderRadius, typography, shadows } from '../theme/theme';
 import { supabase } from '../lib/supabase';
-import { getMeshSlice, isLidarAvailable, getMeshVertices } from '../../modules/lidar-mesh/src/index';
+import { getMeshSlice, isLidarAvailable, getMeshVertices, enableSceneReconstruction } from '../../modules/lidar-mesh/src/index';
 
 ViroMaterials.createMaterials({
   clayMaterial: {
@@ -474,7 +474,11 @@ export default function SandboxARScreen({ navigation }: any) {
 
   // Poll for 3D mesh vertices when WIRE is active
   useEffect(() => {
-    if (!showWire || !hasLidar) return;
+    if (!showWire) return;
+    // Force-enable LiDAR scene reconstruction
+    enableSceneReconstruction().then(ok => {
+      if (ok) setHasLidar(true);
+    });
     let alive = true;
     const poll = async () => {
       while (alive) {
@@ -487,7 +491,7 @@ export default function SandboxARScreen({ navigation }: any) {
     };
     poll();
     return () => { alive = false; };
-  }, [showWire, hasLidar]);
+  }, [showWire]);
   
   // Hoisted state for Wall and Floor detection from ARKit
   const [planes, setPlanes] = useState<{[key: string]: any}>({});

@@ -632,10 +632,10 @@ export default function SandboxARScreen({ navigation }: any) {
         occlusionMode="depthBased"
         worldMeshEnabled={showWire}
         worldMeshConfig={{
-          stride: 2,
-          minConfidence: 0.2,
+          stride: 3,
+          minConfidence: 0.3,
           maxDepth: 5.0,
-          updateIntervalMs: 100,
+          updateIntervalMs: 150,
           debugDrawEnabled: true,
         }}
         onWorldMeshUpdated={(stats: any) => {

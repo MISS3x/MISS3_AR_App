@@ -324,6 +324,8 @@ const ARScene = (props: any) => {
 
         const scaleArgs = pendingModelContext.model_transform?.scale;
         const parsedScale: [number, number, number] = scaleArgs ? [scaleArgs.x, scaleArgs.y, scaleArgs.z] : [1, 1, 1];
+        const rotArgs = pendingModelContext.model_transform?.rotation;
+        const parsedRotation: [number, number, number] = rotArgs ? [rotArgs.x, rotArgs.y, rotArgs.z] : [0, 0, 0];
 
         const newObject: ARPlacedObject = {
           id: Math.random().toString(36).substring(7),
@@ -331,7 +333,7 @@ const ARScene = (props: any) => {
           localUri: pendingModelContext.localUri,
           position: [hitPos[0], hitPos[1], hitPos[2]],
           scale: parsedScale,
-          rotation: [0, 0, 0],
+          rotation: parsedRotation,
           yOffset: 0,
         };
 

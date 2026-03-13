@@ -19,7 +19,9 @@
       "infoPlist": {
         "NSCameraUsageDescription": "MISS3 AR needs camera access for augmented reality features",
         "NSPhotoLibraryUsageDescription": "MISS3 AR needs photo library access to save AR screenshots",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSPhotoLibraryAddUsageDescription": "Allow $(PRODUCT_NAME) to save photos",
+        "NSMicrophoneUsageDescription": "Allow $(PRODUCT_NAME) to use your microphone"
       }
     },
     "android": {
@@ -39,7 +41,7 @@
     },
     "extra": {
       "eas": {
-        "projectId": "d430025a-3859-42f7-9b32-840f6a2e5a42"
+        "projectId": "7d1287a3-f179-4989-a8fa-f11230fbed4a"
       }
     },
     "plugins": [

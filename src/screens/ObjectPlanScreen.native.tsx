@@ -274,7 +274,8 @@ const ARScene = (props: any) => {
   const { 
      placedObjects, setPlacedObjects, 
      showMesh, planes, setPlanes,
-     pendingModelContext, setPendingModelContext 
+     pendingModelContext, setPendingModelContext,
+     meshContour, showWire
   } = props.sceneNavigator.viroAppProps;
   
   const [rings, setRings] = useState<{ id: number; position: [number, number, number] }[]>([]);
@@ -393,6 +394,15 @@ const ARScene = (props: any) => {
       {placedObjects && placedObjects.map((obj: ARPlacedObject, i: number) => (
         <ARNodeComponent key={obj.id} obj={obj} index={i} setPlacedObjects={setPlacedObjects} arSceneRef={arSceneRef} />
       ))}
+
+      {/* LiDAR mesh contour points — 3D visualization */}
+      {showWire && meshContour && meshContour.map(([x, z]: [number, number], i: number) => (
+        <ViroBox key={`wire-${i}`}
+          position={[x, 1.0, z]}
+          width={0.03} height={0.03} length={0.03}
+          materials={["ringMaterial"]}
+        />
+      ))}
     </ViroARScene>
   );
 };
@@ -406,6 +416,7 @@ export default function SandboxARScreen({ navigation }: any) {
   // AR View States
   const [showMap, setShowMap] = useState(false);
   const [showMesh, setShowMesh] = useState(true);
+  const [showWire, setShowWire] = useState(false);
   const [cutHeight, setCutHeight] = useState(1.0);
   
   // LiDAR mesh contour points [x, z]
@@ -520,7 +531,8 @@ export default function SandboxARScreen({ navigation }: any) {
         viroAppProps={{ 
            placedObjects, setPlacedObjects, 
            showMesh, planes, setPlanes,
-           pendingModelContext, setPendingModelContext
+           pendingModelContext, setPendingModelContext,
+           meshContour, showWire
         }}
         style={styles.viroContainer} 
         occlusionMode="depthBased"
@@ -770,6 +782,9 @@ export default function SandboxARScreen({ navigation }: any) {
         
         <TouchableOpacity style={[styles.clayButton, showMesh && styles.clayButtonActive]} onPress={() => setShowMesh(!showMesh)}>
           <Text style={styles.clayButtonText}>MESH</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.clayButton, showWire && styles.clayButtonActive]} onPress={() => setShowWire(!showWire)}>
+          <Text style={styles.clayButtonText}>WIRE</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[styles.clayButton, showMap && styles.clayButtonActive]} onPress={() => setShowMap(!showMap)}>
           <Text style={styles.clayButtonText}>MAP</Text>

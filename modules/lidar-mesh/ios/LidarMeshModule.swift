@@ -22,7 +22,8 @@ fileprivate let performSwizzle: Void = {
         method_exchangeImplementations(originalDel, swizzledDel)
     }
     
-    if let originalRun = class_getInstanceMethod(ARSession.self, #selector(ARSession.run(with:options:))),
+    let runSelector = NSSelectorFromString("runWithConfiguration:options:")
+    if let originalRun = class_getInstanceMethod(ARSession.self, runSelector),
        let swizzledRun = class_getInstanceMethod(ARSession.self, #selector(ARSession.swizzled_run(with:options:))) {
         method_exchangeImplementations(originalRun, swizzledRun)
     }

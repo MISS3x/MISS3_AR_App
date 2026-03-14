@@ -5,7 +5,8 @@ import { Image } from 'expo-image';
 import {
   ViroARSceneNavigator, ViroARScene, Viro3DObject, ViroAmbientLight,
   ViroNode, ViroDirectionalLight, ViroQuad, ViroMaterials,
-  ViroARPlaneSelector, ViroBox, ViroARPlane, ViroAnimations, ViroText
+  ViroARPlaneSelector, ViroBox, ViroARPlane, ViroAnimations, ViroText,
+  ViroPolyline, ViroGeometry
 } from '@reactvision/react-viro';
 import * as FileSystem from 'expo-file-system/legacy';
 
@@ -33,7 +34,7 @@ ViroMaterials.createMaterials({
   wireMaterial: {
     lightingModel: "Constant",
     blendMode: "Add",
-    diffuseColor: "rgba(0, 255, 200, 0.8)"
+    diffuseColor: "rgba(0, 255, 200, 0.4)" // Soft semi-transparent wire mesh
   }
 });
 
@@ -428,14 +429,16 @@ const ARScene = (props: any) => {
         <ARNodeComponent key={obj.id} obj={obj} index={i} setPlacedObjects={setPlacedObjects} arSceneRef={arSceneRef} />
       ))}
 
-      {/* LiDAR mesh — 3D point cloud rendered as a single continuous line for performance */}
-      {showWire && meshVertices3D && meshVertices3D.length > 0 && (
-        <ViroPolyline
-          position={[0, 0, 0]}
-          points={meshVertices3D}
-          thickness={0.015}
-          materials={["wireMaterial"]}
-        />
+      {/* LiDAR mesh — 3D Triangular Surface Mesh */}
+      {showWire && meshVertices3D && meshVertices3D.length > 0 && meshFaces3D && meshFaces3D.length > 0 && (
+        <ViroNode position={[0,0,0]}>
+           <ViroGeometry
+             position={[0, 0, 0]}
+             vertices={meshVertices3D}
+             triangleIndices={meshFaces3D}
+             materials={["wireMaterial"]}
+           />
+        </ViroNode>
       )}
       {/* Fallback: meshContour 2D at Y=1m */}
       {showWire && (!meshVertices3D || meshVertices3D.length === 0) && meshContour && meshContour.length > 0 && (
@@ -465,9 +468,10 @@ export default function SandboxARScreen({ navigation }: any) {
   // LiDAR mesh contour points [x, z]
   const [meshContour, setMeshContour] = useState<[number, number][]>([]);
   const [meshVertices3D, setMeshVertices3D] = useState<[number, number, number][]>([]);
+  const [meshFaces3D, setMeshFaces3D] = useState<[number, number, number][]>([]);
   const [hasLidar, setHasLidar] = useState(false);
 
-  // Poll for 3D mesh vertices when WIRE is active
+  // Poll for 3D mesh vertices and faces when WIRE is active
   useEffect(() => {
     if (!showWire) return;
     // Force-enable LiDAR scene reconstruction
@@ -478,8 +482,23 @@ export default function SandboxARScreen({ navigation }: any) {
     const poll = async () => {
       while (alive) {
         try {
-          const verts = await getMeshVertices(2000);
-          if (alive) setMeshVertices3D(verts as [number, number, number][]);
+          const { vertices, edges } = await getMeshWireframe(5000);
+          if (alive && vertices) {
+            setMeshVertices3D(vertices as [number, number, number][]);
+            
+            // Reconstruct triangle faces from ARKit wireframe edges
+            // Since ARKit yields 3 edges per face (i0-i1, i1-i2, i2-i0) in sequence:
+            if (edges && edges.length > 0) {
+              const faces: [number, number, number][] = [];
+              for (let i = 0; i < edges.length; i += 3) {
+                  if (i + 2 < edges.length) {
+                      // Extract the 3 unique vertex indices for this triangle
+                      faces.push([edges[i][0], edges[i][1], edges[i+1][1]]);
+                  }
+              }
+              setMeshFaces3D(faces);
+            }
+          }
         } catch {}
         await new Promise(r => setTimeout(r, 2000));
       }

@@ -8,22 +8,19 @@ const LidarMesh = (() => {
   }
 })();
 
-/** Check if this module loaded successfully */
 export function isModuleLoaded(): boolean {
   return LidarMesh !== null;
 }
 
-/** Simple ping to verify module is alive */
 export function ping(): string {
   if (!LidarMesh) return 'Module not loaded';
   try {
-    return LidarMesh.ping();
+    return LidarMesh.hello();
   } catch (e) {
-    return `ping error: ${e}`;
+    return `error: ${e}`;
   }
 }
 
-/** Check if device has LiDAR */
 export function isLidarAvailable(): boolean {
   if (!LidarMesh) return false;
   try {
@@ -33,7 +30,6 @@ export function isLidarAvailable(): boolean {
   }
 }
 
-/** Enable ARKit scene reconstruction (.mesh) on the active AR session */
 export async function enableSceneReconstruction(): Promise<Record<string, any>> {
   if (!LidarMesh) return { error: 'Module not loaded' };
   try {
@@ -43,9 +39,6 @@ export async function enableSceneReconstruction(): Promise<Record<string, any>> 
   }
 }
 
-/** Get wireframe mesh data from ARMeshAnchors
- * Returns { vertices: [[x,y,z],...], edges: [[v1,v2],...], anchors, totalVertices, totalEdges }
- */
 export async function getMeshWireframe(maxVertices: number = 5000): Promise<{
   vertices: [number, number, number][];
   edges: [number, number][];
@@ -62,20 +55,14 @@ export async function getMeshWireframe(maxVertices: number = 5000): Promise<{
   }
 }
 
-// Legacy exports for backward compatibility
-export async function getMeshSlice(cutHeight: number): Promise<[number, number][]> {
-  return [];
-}
-
-export async function getMeshVertices(maxPoints: number = 2000): Promise<[number, number, number][]> {
-  return [];
-}
-
+// Legacy compat
+export async function getMeshSlice(_cutHeight: number): Promise<[number, number][]> { return []; }
+export async function getMeshVertices(_maxPoints: number = 2000): Promise<[number, number, number][]> { return []; }
 export async function getDebugInfo(): Promise<Record<string, any>> {
   if (!LidarMesh) return { moduleLoaded: false };
   try {
-    const result = await LidarMesh.enableSceneReconstruction();
-    return { moduleLoaded: true, ...result };
+    const r = await LidarMesh.enableSceneReconstruction();
+    return { moduleLoaded: true, ...r };
   } catch (e) {
     return { moduleLoaded: true, error: String(e) };
   }

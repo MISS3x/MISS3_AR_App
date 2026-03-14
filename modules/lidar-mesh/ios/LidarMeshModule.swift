@@ -5,12 +5,12 @@ public class LidarMeshModule: Module {
   public func definition() -> ModuleDefinition {
     Name("LidarMesh")
 
-    // Simple test to verify module loads
-    Function("ping") { () -> String in
+    // Test function to verify module loaded
+    Function("hello") {
       return "LidarMesh module loaded OK"
     }
 
-    // Check LiDAR hardware support
+    // Check LiDAR hardware
     Function("isLidarAvailable") { () -> Bool in
       if #available(iOS 13.4, *) {
         return ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh)
@@ -18,46 +18,32 @@ public class LidarMeshModule: Module {
       return false
     }
 
-    // Enable scene reconstruction on ViroReact's AR session
+    // Enable ARKit scene reconstruction on ViroReact's session
     AsyncFunction("enableSceneReconstruction") { () -> [String: Any] in
-      return self.enableMeshOnMain()
+      return self.runOnMain { self.doEnableSceneReconstruction() }
     }
 
-    // Get mesh wireframe data from ARMeshAnchors
+    // Get mesh wireframe from ARMeshAnchors
     AsyncFunction("getMeshWireframe") { (maxVertices: Int) -> [String: Any] in
-      return self.getMeshWireframeOnMain(maxVertices: maxVertices)
+      return self.runOnMain { self.doGetMeshWireframe(maxVertices: maxVertices) }
     }
   }
 
   private var cachedSession: ARSession? = nil
 
-  // MARK: - Main Thread Wrappers
-
-  private func enableMeshOnMain() -> [String: Any] {
-    var result: [String: Any] = [:]
-    let work = {
-      result = self.doEnableSceneReconstruction()
-    }
-    if Thread.isMainThread { work() } else { DispatchQueue.main.sync { work() } }
+  // Run block on main thread, return result
+  private func runOnMain<T>(_ block: @escaping () -> T) -> T {
+    if Thread.isMainThread { return block() }
+    var result: T!
+    DispatchQueue.main.sync { result = block() }
     return result
   }
 
-  private func getMeshWireframeOnMain(maxVertices: Int) -> [String: Any] {
-    var result: [String: Any] = [:]
-    let work = {
-      result = self.doGetMeshWireframe(maxVertices: maxVertices)
-    }
-    if Thread.isMainThread { work() } else { DispatchQueue.main.sync { work() } }
-    return result
-  }
-
-  // MARK: - Find ARSession from ViroReact
-
+  // Find ViroReact's ARSession by traversing view hierarchy
   private func findARSession() -> ARSession? {
     if let cached = cachedSession, cached.currentFrame != nil {
       return cached
     }
-
     for scene in UIApplication.shared.connectedScenes {
       guard let ws = scene as? UIWindowScene else { continue }
       for window in ws.windows {
@@ -78,22 +64,17 @@ public class LidarMeshModule: Module {
     return nil
   }
 
-  // MARK: - Enable Scene Reconstruction
-
+  // Enable scene reconstruction mesh on the AR session
   private func doEnableSceneReconstruction() -> [String: Any] {
     var info: [String: Any] = ["isMainThread": Thread.isMainThread]
 
     guard let session = findARSession() else {
       info["error"] = "No ARSession found"
       info["sessionFound"] = false
-      
-      // Count ARSCNViews for debugging
       var viewCount = 0
       for scene in UIApplication.shared.connectedScenes {
         if let ws = scene as? UIWindowScene {
-          for window in ws.windows {
-            viewCount += countARViews(in: window)
-          }
+          for window in ws.windows { viewCount += countARViews(in: window) }
         }
       }
       info["arSCNViewCount"] = viewCount
@@ -110,11 +91,9 @@ public class LidarMeshModule: Module {
         let config = ARWorldTrackingConfiguration()
         config.sceneReconstruction = .mesh
         config.planeDetection = [.horizontal, .vertical]
-
         if ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
           config.frameSemantics.insert(.sceneDepth)
         }
-
         session.run(config, options: [])
         info["meshEnabled"] = true
       } else {
@@ -128,16 +107,14 @@ public class LidarMeshModule: Module {
     return info
   }
 
-  // MARK: - Get Mesh Wireframe from ARMeshAnchors
-
+  // Get wireframe data from ARMeshAnchors
   private func doGetMeshWireframe(maxVertices: Int) -> [String: Any] {
-    guard let session = findARSession(),
-          let frame = session.currentFrame else {
-      return ["vertices": [], "indices": [], "anchors": 0]
+    guard let session = findARSession(), let frame = session.currentFrame else {
+      return ["vertices": [] as [[Double]], "edges": [] as [[Int]], "anchors": 0]
     }
 
-    var allVertices: [[Double]] = []  // [x, y, z] world coordinates
-    var allEdges: [[Int]] = []        // [v1, v2] index pairs for wireframe lines
+    var allVertices: [[Double]] = []
+    var allEdges: [[Int]] = []
     var anchorCount = 0
     var vertexOffset = 0
 
@@ -150,7 +127,6 @@ public class LidarMeshModule: Module {
       let vCount = geo.vertices.count
       let fCount = geo.faces.count
 
-      // Transform vertices to world space
       for i in 0..<vCount {
         if allVertices.count >= maxVertices { break }
         let v = geo.vertices[i]
@@ -159,20 +135,16 @@ public class LidarMeshModule: Module {
         allVertices.append([Double(world.x), Double(world.y), Double(world.z)])
       }
 
-      let addedVerts = min(vCount, maxVertices - (vertexOffset))
+      let addedVerts = min(vCount, maxVertices - vertexOffset)
       if addedVerts <= 0 { break }
 
-      // Extract edges from triangle faces (each face = 3 edges)
       let indexBuf = geo.faces.buffer.contents()
-      let bytesPerIndex = geo.faces.bytesPerIndex
+      let bpi = geo.faces.bytesPerIndex
 
       for f in 0..<fCount {
-        let base = f * 3 * bytesPerIndex
-        let i0: Int
-        let i1: Int
-        let i2: Int
-
-        if bytesPerIndex == 4 {
+        let base = f * 3 * bpi
+        let i0: Int, i1: Int, i2: Int
+        if bpi == 4 {
           i0 = Int(indexBuf.load(fromByteOffset: base, as: UInt32.self))
           i1 = Int(indexBuf.load(fromByteOffset: base + 4, as: UInt32.self))
           i2 = Int(indexBuf.load(fromByteOffset: base + 8, as: UInt32.self))
@@ -181,8 +153,6 @@ public class LidarMeshModule: Module {
           i1 = Int(indexBuf.load(fromByteOffset: base + 2, as: UInt16.self))
           i2 = Int(indexBuf.load(fromByteOffset: base + 4, as: UInt16.self))
         }
-
-        // Only add edges where both vertices are in range
         if i0 < addedVerts && i1 < addedVerts {
           allEdges.append([i0 + vertexOffset, i1 + vertexOffset])
         }

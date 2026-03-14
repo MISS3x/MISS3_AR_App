@@ -11,7 +11,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 
 import { colors, spacing, borderRadius, typography, shadows } from '../theme/theme';
 import { supabase } from '../lib/supabase';
-import { getMeshSlice, isLidarAvailable, getMeshVertices, enableSceneReconstruction, getDebugInfo } from '../../modules/lidar-mesh/src/index';
+import { ping, isLidarAvailable, enableSceneReconstruction, getMeshWireframe, getMeshSlice, getMeshVertices, getDebugInfo } from '../../modules/lidar-mesh/src/index';
 
 ViroMaterials.createMaterials({
   clayMaterial: {
@@ -879,13 +879,20 @@ export default function SandboxARScreen({ navigation }: any) {
             const planeCount = Object.keys(planes).length;
             const floorCount = Object.values(planes).filter((p: any) => p.alignment === 'Horizontal').length;
             const wallCount = Object.values(planes).filter((p: any) => p.alignment === 'Vertical').length;
-            const ms = meshStats;
-            Alert.alert("WIRE Mesh", [
-              `Vertices: ${ms?.vertexCount ?? 0}`,
-              `Triangles: ${ms?.triangleCount ?? 0}`,
-              `Confidence: ${ms ? (ms.averageConfidence * 100).toFixed(0) + '%' : 'N/A'}`,
-              `Planes: ${planeCount} (${floorCount}F/${wallCount}W)`,
-            ].join('\n'));
+            // Test native module + enable ARKit mesh
+            const pingResult = ping();
+            const lidarOk = isLidarAvailable();
+            enableSceneReconstruction().then(sr => {
+              const ms = meshStats;
+              Alert.alert("WIRE Mesh", [
+                `Module: ${pingResult}`,
+                `LiDAR: ${lidarOk ? '✅' : '❌'}`,
+                `Session: ${sr.sessionFound ? '✅' : sr.error || '❌'}`,
+                `ARKit Mesh: ${sr.meshEnabled ? '✅' : '❌'}`,
+                `Viro Verts: ${ms?.vertexCount ?? 0}`,
+                `Planes: ${planeCount} (${floorCount}F/${wallCount}W)`,
+              ].join('\n'));
+            });
           }
         }}>
           <Text style={styles.clayButtonText}>WIRE</Text>

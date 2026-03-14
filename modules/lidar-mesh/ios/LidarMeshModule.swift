@@ -1,8 +1,37 @@
 import ExpoModulesCore
 import ARKit
 
+fileprivate var globalARSession: ARSession?
+
+extension ARSession {
+    @objc dynamic func swizzled_setDelegate(_ delegate: ARSessionDelegate?) {
+        globalARSession = self
+        self.swizzled_setDelegate(delegate)
+    }
+    
+    @objc dynamic func swizzled_run(with configuration: ARConfiguration, options: ARSession.RunOptions) {
+        globalARSession = self
+        self.swizzled_run(with: configuration, options: options)
+    }
+}
+
+fileprivate let performSwizzle: Void = {
+    let setDelegateSelector = NSSelectorFromString("setDelegate:")
+    if let originalDel = class_getInstanceMethod(ARSession.self, setDelegateSelector),
+       let swizzledDel = class_getInstanceMethod(ARSession.self, #selector(ARSession.swizzled_setDelegate(_:))) {
+        method_exchangeImplementations(originalDel, swizzledDel)
+    }
+    
+    if let originalRun = class_getInstanceMethod(ARSession.self, #selector(ARSession.run(with:options:))),
+       let swizzledRun = class_getInstanceMethod(ARSession.self, #selector(ARSession.swizzled_run(with:options:))) {
+        method_exchangeImplementations(originalRun, swizzledRun)
+    }
+}()
+
 public class LidarMeshModule: Module {
   public func definition() -> ModuleDefinition {
+    _ = performSwizzle
+    
     Name("LidarMesh")
 
     // Test function to verify module loaded
@@ -29,8 +58,6 @@ public class LidarMeshModule: Module {
     }
   }
 
-  private var cachedSession: ARSession? = nil
-
   // Run block on main thread, return result
   private func runOnMain<T>(_ block: @escaping () -> T) -> T {
     if Thread.isMainThread { return block() }
@@ -39,29 +66,9 @@ public class LidarMeshModule: Module {
     return result
   }
 
-  // Find ViroReact's ARSession by traversing view hierarchy
+  // Get the swizzled global ARSession
   private func findARSession() -> ARSession? {
-    if let cached = cachedSession, cached.currentFrame != nil {
-      return cached
-    }
-    for scene in UIApplication.shared.connectedScenes {
-      guard let ws = scene as? UIWindowScene else { continue }
-      for window in ws.windows {
-        if let arView = findARSCNView(in: window) {
-          cachedSession = arView.session
-          return arView.session
-        }
-      }
-    }
-    return nil
-  }
-
-  private func findARSCNView(in view: UIView) -> ARSCNView? {
-    if let arView = view as? ARSCNView { return arView }
-    for sub in view.subviews {
-      if let found = findARSCNView(in: sub) { return found }
-    }
-    return nil
+    return globalARSession
   }
 
   // Enable scene reconstruction mesh on the AR session

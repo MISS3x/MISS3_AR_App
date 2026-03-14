@@ -129,8 +129,9 @@ public class LidarMeshModule: Module {
 
       for i in 0..<vCount {
         if allVertices.count >= maxVertices { break }
-        let v = geo.vertices[i]
-        let local = SIMD4<Float>(v[0], v[1], v[2], 1.0)
+        let vertexPointer = geo.vertices.buffer.contents().advanced(by: geo.vertices.offset + geo.vertices.stride * i)
+        let vx = vertexPointer.assumingMemoryBound(to: Float.self)
+        let local = SIMD4<Float>(vx[0], vx[1], vx[2], 1.0)
         let world = transform * local
         allVertices.append([Double(world.x), Double(world.y), Double(world.z)])
       }
@@ -140,9 +141,10 @@ public class LidarMeshModule: Module {
 
       let indexBuf = geo.faces.buffer.contents()
       let bpi = geo.faces.bytesPerIndex
+      let indicesPerFace = geo.faces.indexCountPerPrimitive
 
       for f in 0..<fCount {
-        let base = f * 3 * bpi
+        let base = f * indicesPerFace * bpi
         let i0: Int, i1: Int, i2: Int
         if bpi == 4 {
           i0 = Int(indexBuf.load(fromByteOffset: base, as: UInt32.self))

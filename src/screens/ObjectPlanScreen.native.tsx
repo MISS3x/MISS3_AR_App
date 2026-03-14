@@ -428,22 +428,24 @@ const ARScene = (props: any) => {
         <ARNodeComponent key={obj.id} obj={obj} index={i} setPlacedObjects={setPlacedObjects} arSceneRef={arSceneRef} />
       ))}
 
-      {/* LiDAR mesh — 3D point cloud */}
-      {showWire && meshVertices3D && meshVertices3D.length > 0 && meshVertices3D.map(([x, y, z]: [number, number, number], i: number) => (
-        <ViroBox key={`wire-${i}`}
-          position={[x, y, z]}
-          width={0.02} height={0.02} length={0.02}
+      {/* LiDAR mesh — 3D point cloud rendered as a single continuous line for performance */}
+      {showWire && meshVertices3D && meshVertices3D.length > 0 && (
+        <ViroPolyline
+          position={[0, 0, 0]}
+          points={meshVertices3D}
+          thickness={0.015}
           materials={["wireMaterial"]}
         />
-      ))}
+      )}
       {/* Fallback: meshContour 2D at Y=1m */}
-      {showWire && (!meshVertices3D || meshVertices3D.length === 0) && meshContour && meshContour.length > 0 && meshContour.map(([x, z]: [number, number], i: number) => (
-        <ViroBox key={`wire2d-${i}`}
-          position={[x, 1.0, z]}
-          width={0.02} height={0.02} length={0.02}
+      {showWire && (!meshVertices3D || meshVertices3D.length === 0) && meshContour && meshContour.length > 0 && (
+        <ViroPolyline
+          position={[0, 1.0, 0]}
+          points={meshContour.map(p => [p[0], 0, p[1]] as [number, number, number])}
+          thickness={0.015}
           materials={["wireMaterial"]}
         />
-      ))}
+      )}
     </ViroARScene>
   );
 };
@@ -611,7 +613,7 @@ export default function SandboxARScreen({ navigation }: any) {
           minConfidence: 0.3,
           maxDepth: 5.0,
           updateIntervalMs: 100,
-          debugDrawEnabled: true,
+          debugDrawEnabled: false, // Turned off to remove the small red triangles
         }}
         onWorldMeshUpdated={(stats: any) => {
           if (stats) {

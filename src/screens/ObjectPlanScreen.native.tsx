@@ -879,23 +879,8 @@ export default function SandboxARScreen({ navigation }: any) {
           const newState = !showWire;
           setShowWire(newState);
           if (newState) {
-            const planeCount = Object.keys(planes).length;
-            const floorCount = Object.values(planes).filter((p: any) => p.alignment === 'Horizontal').length;
-            const wallCount = Object.values(planes).filter((p: any) => p.alignment === 'Vertical').length;
-            // Test native module + enable ARKit mesh
-            const pingResult = ping();
-            const lidarOk = isLidarAvailable();
-            enableSceneReconstruction().then(sr => {
-              const ms = meshStats;
-              Alert.alert("WIRE Mesh", [
-                `Module: ${pingResult}`,
-                `LiDAR: ${lidarOk ? '✅' : '❌'}`,
-                `Session: ${sr.sessionFound ? '✅' : sr.error || '❌'}`,
-                `ARKit Mesh: ${sr.meshEnabled ? '✅' : '❌'}`,
-                `Viro Verts: ${ms?.vertexCount ?? 0}`,
-                `Planes: ${planeCount} (${floorCount}F/${wallCount}W)`,
-              ].join('\n'));
-            });
+            // Force enable ARKit mesh processing natively without blocking UI
+            enableSceneReconstruction();
           }
         }}>
           <Text style={styles.clayButtonText}>WIRE</Text>
@@ -904,6 +889,14 @@ export default function SandboxARScreen({ navigation }: any) {
           <Text style={styles.clayButtonText}>MAP</Text>
         </TouchableOpacity>
       </View>
+      {/* LiDAR Live Stats HUD */}
+      {showWire && (
+        <View style={[styles.floatingHud, { top: insets.top + spacing.xl + 20 }]}>
+          <Text style={styles.hudText}>🔴 LiDAR ACTIVE: POINT CLOUD (SAFE MODE)</Text>
+          <Text style={styles.hudText}>Native Verts Captured: {meshVertices3D.length}</Text>
+          {meshVertices3D.length === 0 && <Text style={styles.hudText}>(Move device around to scan)</Text>}
+        </View>
+      )}
 
       {/* Bottom Floating Appended Action Area */}
       {!isCatalogOpen && (
@@ -978,6 +971,9 @@ const styles = StyleSheet.create({
   
   promptOverlay: { position: 'absolute', top: 120, left: spacing.md, right: spacing.md, alignItems: 'center', zIndex: 12, pointerEvents: 'none' },
   promptText: { backgroundColor: 'rgba(0,0,0,0.8)', color: colors.primary, paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderRadius: 30, fontFamily: typography.fontFamily.semiBold, ...shadows.md, overflow: 'hidden'},
+  
+  floatingHud: { position: 'absolute', left: spacing.md, right: spacing.md, backgroundColor: 'rgba(0,0,0,0.7)', padding: spacing.md, borderRadius: borderRadius.sm, zIndex: 10, borderWidth: 1, borderColor: colors.primary },
+  hudText: { color: colors.primary, fontFamily: typography.fontFamily.bold, fontSize: 12, marginBottom: 2, textAlign: 'center' },
   
   bottomOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, alignItems: 'center', zIndex: 10 },
   addButton: {

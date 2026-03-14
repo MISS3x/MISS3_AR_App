@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import {
   ViroARSceneNavigator, ViroARScene, Viro3DObject, ViroAmbientLight,
+  ViroNode, ViroDirectionalLight, ViroQuad, ViroMaterials,
   ViroARPlaneSelector, ViroBox, ViroARPlane, ViroAnimations, ViroText
 } from '@reactvision/react-viro';
 import * as FileSystem from 'expo-file-system/legacy';

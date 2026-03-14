@@ -29,10 +29,19 @@ fileprivate let performSwizzle: Void = {
     }
 }()
 
-public class LidarMeshModule: Module {
-  public func definition() -> ModuleDefinition {
+// Run swizzling once when the class is loaded
+fileprivate let swizzleLoader: () = {
     _ = performSwizzle
-    
+}()
+
+public class LidarMeshModule: Module {
+  
+  public required init(appContext: AppContext) {
+    _ = swizzleLoader
+    super.init(appContext: appContext)
+  }
+
+  public func definition() -> ModuleDefinition {
     Name("LidarMesh")
 
     // Test function to verify module loaded

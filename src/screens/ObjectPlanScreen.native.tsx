@@ -428,22 +428,12 @@ const ARScene = (props: any) => {
         <ARNodeComponent key={obj.id} obj={obj} index={i} setPlacedObjects={setPlacedObjects} arSceneRef={arSceneRef} />
       ))}
 
-      {/* LiDAR mesh — Safe 3D Point Cloud Representation */}
-      {showWire && meshVertices3D && meshVertices3D.length > 0 && meshVertices3D.map(([x, y, z]: [number, number, number], i: number) => (
-        <ViroBox key={`wire-${i}`}
-          position={[x, y, z]}
-          width={0.01} height={0.01} length={0.01}
-          materials={["wireMaterial"]}
-        />
-      ))}
-      {/* Fallback: meshContour 2D at Y=1m */}
-      {showWire && (!meshVertices3D || meshVertices3D.length === 0) && meshContour && meshContour.length > 0 && meshContour.map(([x, z]: [number, number], i: number) => (
-        <ViroBox key={`wire2d-${i}`}
-          position={[x, 1.0, z]}
-          width={0.02} height={0.02} length={0.02}
-          materials={["wireMaterial"]}
-        />
-      ))}
+      {/* 
+        LiDAR mesh visualization removed to prevent React Native bridge crashes.
+        Generating thousands of ViroBox/ViroGeometry instances dynamically causes 
+        immediate memory exhaustion. We now only fetch the data to prove connection 
+        and show the vertex count in the "WIRE Mesh" overlay.
+      */}
     </ViroARScene>
   );
 };

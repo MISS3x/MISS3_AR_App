@@ -4,9 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import {
   ViroARSceneNavigator, ViroARScene, Viro3DObject, ViroAmbientLight,
-  ViroNode, ViroDirectionalLight, ViroQuad, ViroMaterials,
-  ViroARPlaneSelector, ViroBox, ViroARPlane, ViroAnimations, ViroText,
-  ViroPolyline, ViroGeometry
+  ViroARPlaneSelector, ViroBox, ViroARPlane, ViroAnimations, ViroText
 } from '@reactvision/react-viro';
 import * as FileSystem from 'expo-file-system/legacy';
 
@@ -429,26 +427,22 @@ const ARScene = (props: any) => {
         <ARNodeComponent key={obj.id} obj={obj} index={i} setPlacedObjects={setPlacedObjects} arSceneRef={arSceneRef} />
       ))}
 
-      {/* LiDAR mesh — 3D Triangular Surface Mesh */}
-      {showWire && meshVertices3D && meshVertices3D.length > 0 && meshFaces3D && meshFaces3D.length > 0 && (
-        <ViroNode position={[0,0,0]}>
-           <ViroGeometry
-             position={[0, 0, 0]}
-             vertices={meshVertices3D}
-             triangleIndices={meshFaces3D}
-             materials={["wireMaterial"]}
-           />
-        </ViroNode>
-      )}
-      {/* Fallback: meshContour 2D at Y=1m */}
-      {showWire && (!meshVertices3D || meshVertices3D.length === 0) && meshContour && meshContour.length > 0 && (
-        <ViroPolyline
-          position={[0, 1.0, 0]}
-          points={meshContour.map(p => [p[0], 0, p[1]] as [number, number, number])}
-          thickness={0.015}
+      {/* LiDAR mesh — Safe 3D Point Cloud Representation */}
+      {showWire && meshVertices3D && meshVertices3D.length > 0 && meshVertices3D.map(([x, y, z]: [number, number, number], i: number) => (
+        <ViroBox key={`wire-${i}`}
+          position={[x, y, z]}
+          width={0.01} height={0.01} length={0.01}
           materials={["wireMaterial"]}
         />
-      )}
+      ))}
+      {/* Fallback: meshContour 2D at Y=1m */}
+      {showWire && (!meshVertices3D || meshVertices3D.length === 0) && meshContour && meshContour.length > 0 && meshContour.map(([x, z]: [number, number], i: number) => (
+        <ViroBox key={`wire2d-${i}`}
+          position={[x, 1.0, z]}
+          width={0.02} height={0.02} length={0.02}
+          materials={["wireMaterial"]}
+        />
+      ))}
     </ViroARScene>
   );
 };
@@ -468,39 +462,36 @@ export default function SandboxARScreen({ navigation }: any) {
   // LiDAR mesh contour points [x, z]
   const [meshContour, setMeshContour] = useState<[number, number][]>([]);
   const [meshVertices3D, setMeshVertices3D] = useState<[number, number, number][]>([]);
-  const [meshFaces3D, setMeshFaces3D] = useState<[number, number, number][]>([]);
   const [hasLidar, setHasLidar] = useState(false);
 
-  // Poll for 3D mesh vertices and faces when WIRE is active
+  // Poll for 3D mesh vertices when WIRE is active
   useEffect(() => {
     if (!showWire) return;
     // Force-enable LiDAR scene reconstruction
     enableSceneReconstruction().then(ok => {
       if (ok) setHasLidar(true);
     });
+    
     let alive = true;
+    let isFetching = false;
+    
     const poll = async () => {
       while (alive) {
-        try {
-          const { vertices, edges } = await getMeshWireframe(5000);
-          if (alive && vertices) {
-            setMeshVertices3D(vertices as [number, number, number][]);
-            
-            // Reconstruct triangle faces from ARKit wireframe edges
-            // Since ARKit yields 3 edges per face (i0-i1, i1-i2, i2-i0) in sequence:
-            if (edges && edges.length > 0) {
-              const faces: [number, number, number][] = [];
-              for (let i = 0; i < edges.length; i += 3) {
-                  if (i + 2 < edges.length) {
-                      // Extract the 3 unique vertex indices for this triangle
-                      faces.push([edges[i][0], edges[i][1], edges[i+1][1]]);
-                  }
+        if (!isFetching) {
+            isFetching = true;
+            try {
+              // Only request 1000 vertices maximum to prevent React Native bridge crashes
+              const { vertices } = await getMeshWireframe(1000);
+              if (alive && vertices) {
+                // Sparsify the points to render fewer React ViroBox components
+                const sparseVertices = (vertices as [number, number, number][]).filter((_, i) => i % 2 === 0);
+                setMeshVertices3D(sparseVertices);
               }
-              setMeshFaces3D(faces);
-            }
-          }
-        } catch {}
-        await new Promise(r => setTimeout(r, 2000));
+            } catch {}
+            isFetching = false;
+        }
+        // Poll slower to let React render
+        await new Promise(r => setTimeout(r, 3000));
       }
     };
     poll();

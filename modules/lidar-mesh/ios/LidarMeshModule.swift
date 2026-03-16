@@ -156,33 +156,6 @@ public class LidarMeshModule: Module {
       let addedVerts = min(vCount, maxVertices - vertexOffset)
       if addedVerts <= 0 { break }
 
-      let indexBuf = geo.faces.buffer.contents()
-      let bpi = geo.faces.bytesPerIndex
-      let indicesPerFace = geo.faces.indexCountPerPrimitive
-
-      for f in 0..<fCount {
-        let base = f * indicesPerFace * bpi
-        let i0: Int, i1: Int, i2: Int
-        if bpi == 4 {
-          i0 = Int(indexBuf.load(fromByteOffset: base, as: UInt32.self))
-          i1 = Int(indexBuf.load(fromByteOffset: base + 4, as: UInt32.self))
-          i2 = Int(indexBuf.load(fromByteOffset: base + 8, as: UInt32.self))
-        } else {
-          i0 = Int(indexBuf.load(fromByteOffset: base, as: UInt16.self))
-          i1 = Int(indexBuf.load(fromByteOffset: base + 2, as: UInt16.self))
-          i2 = Int(indexBuf.load(fromByteOffset: base + 4, as: UInt16.self))
-        }
-        if i0 < addedVerts && i1 < addedVerts {
-          allEdges.append([i0 + vertexOffset, i1 + vertexOffset])
-        }
-        if i1 < addedVerts && i2 < addedVerts {
-          allEdges.append([i1 + vertexOffset, i2 + vertexOffset])
-        }
-        if i2 < addedVerts && i0 < addedVerts {
-          allEdges.append([i2 + vertexOffset, i0 + vertexOffset])
-        }
-      }
-
       vertexOffset += addedVerts
       if allVertices.count >= maxVertices { break }
     }

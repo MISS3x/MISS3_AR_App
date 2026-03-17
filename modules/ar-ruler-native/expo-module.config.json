@@ -1,0 +1,7 @@
+{
+  "name": "ARRulerNative",
+  "platforms": ["ios"],
+  "ios": {
+    "modules": ["ARRulerNativeModule"]
+  }
+}

@@ -101,3 +101,33 @@ git add . && git commit -m "chore: cleanup unused AR deps" && git push
 ### TODO příští session
 - ARKit modul (8 úkolů v task.md)
 - Web editor save/capture bug (MISS3 AR Tool — jiný projekt)
+
+---
+
+# MISS3 AR App — Session Log (2026-03-17)
+
+### ✅ Done Today: Ultimate AR Ruler & Offline Database
+**1. Advanced ARKit Native Module (Swift)**
+- Refactored `ARRulerNativeView.swift` entirely to transition from a single plane to a full room measurement tool.
+- Implemented **LiDAR Mesh Visualization**: Cyan wireframes now trace real-world contours around the cursor in real-time.
+- Added **Wall & Floor Modes**: Raycasting targets prioritize vertical objects in Wall mode (`isWallMode=true`), horizontal planes in Floor mode.
+- Added 3D Area calculations using the generalized **Newell's Method** for perfect polygon area computation regardless of slope.
+- Dynamically changing colors based on mode (Green/Red for floor, Blue/Cyan for walls) with smooth drawing.
+
+**2. Offline-First Storage Architecture**
+- Integrated `@react-native-async-storage/async-storage`.
+- Hits to "Export" immediately save raw `x,y,z` point arrays locally under a `pending` status.
+- Allows robust measuring without any internet requirement. No data loss.
+
+**3. App-Boot Supabase Sync Mechanism**
+- User created `ar_projects` and `ar_measurements` tables in the Supabase instance.
+- Using a highly-scalable `JSONB` column to store infinite arrays of 3D point metrics.
+- Added a `syncMeasurements` boot check that automatically flushes local data via REST API to the Supabase Cloud as soon as internet is available.
+- Added a transparent DB Sync Debug Window on the UI with pending vs uploaded counts.
+
+**4. Project Management Flow**
+- Implemented a React Native "Project Creation" Modal that intercepts app startup.
+- Users can choose to create a Named Project (saving data) or enter Free Mode (prevents storage).
+
+**5. Expo Cloud Deploys**
+- Triggered and completed multiple **EAS Cloud Builds** to bundle the native iOS Swift logic, Metal Shaders, and the AsyncStorage module dependencies without needing Xcode.

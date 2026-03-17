@@ -185,7 +185,7 @@ export default function CompanySelectScreen({ navigation }: CompanySelectScreenP
         <TouchableOpacity 
           onPress={() => navigation.navigate('RoomSandbox')}
           activeOpacity={0.85}
-          style={styles.toolCard}
+          style={[styles.toolCard, { marginBottom: spacing.sm }]}
         >
           <LinearGradient
             colors={['#1a1a3e', '#0d1b2a']}
@@ -202,6 +202,27 @@ export default function CompanySelectScreen({ navigation }: CompanySelectScreenP
             </View>
             <View style={styles.proBadge}>
               <Text style={styles.proBadgeText}>PRO</Text>
+            </View>
+          </LinearGradient>
+        </TouchableOpacity>
+
+        <TouchableOpacity 
+          onPress={() => navigation.navigate('ARRuler')}
+          activeOpacity={0.85}
+          style={styles.toolCard}
+        >
+          <LinearGradient
+            colors={['#3e2a1a', '#2a1a0d']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.toolCardGradient}
+          >
+            <View style={styles.toolCardLeft}>
+              <Text style={styles.toolIcon}>📏</Text>
+              <View>
+                <Text style={styles.toolTitle}>AR Ruler</Text>
+                <Text style={styles.toolSubtitle}>Measure rooms mathematically in 3D</Text>
+              </View>
             </View>
           </LinearGradient>
         </TouchableOpacity>

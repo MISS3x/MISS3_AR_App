@@ -939,7 +939,7 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
       let indexBuffer = faceBuffer.buffer.contents()
       let bytesPerIndex = faceBuffer.bytesPerIndex
       
-      var classificationPtr: UnsafeRawPointer? = nil
+      var classificationPtr: UnsafeMutableRawPointer? = nil
       if #available(iOS 13.4, *) {
         if let classSource = geometry.classification {
           classificationPtr = classSource.buffer.contents()

@@ -941,7 +941,9 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
       
       var classificationPtr: UnsafeRawPointer? = nil
       if #available(iOS 13.4, *) {
-        classificationPtr = geometry.classification?.buffer.contents()
+        if let classSource = geometry.classification {
+          classificationPtr = classSource.buffer.contents()
+        }
       }
       
       var groupedFaces: [UInt8: String] = [:]

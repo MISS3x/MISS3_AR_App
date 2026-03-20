@@ -41,7 +41,7 @@
     },
     "extra": {
       "eas": {
-        "projectId": "17cfbf11-10e6-49b7-8aba-dd4a52ae4934"
+        "projectId": "781281a9-d60a-4dd8-85b8-980db8bb84cb"
       }
     },
     "plugins": [
@@ -54,6 +54,7 @@
         }
       ],
       "./plugins/withSceneReconstruction"
-    ]
+    ],
+    "owner": "bonboniere3dx"
   }
 }

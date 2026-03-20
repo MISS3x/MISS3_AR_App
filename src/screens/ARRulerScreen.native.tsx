@@ -1049,8 +1049,8 @@ export default function ARRulerScreen({ navigation }: any) {
               <TouchableOpacity style={styles.modalBtnSkip} onPress={handleSkipProject}>
                 <Text style={styles.modalBtnSkipText}>Free Mode</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.modalBtnCreate, { backgroundColor: '#4CAF50' }]} onPress={handleCreateProject}>
-                <Text style={styles.modalBtnCreateText}>Create</Text>
+              <TouchableOpacity style={[styles.modalBtnCreate, { backgroundColor: projectModalTab === 'load' ? '#33CCFF' : '#4CAF50' }]} onPress={handleCreateProject}>
+                <Text style={styles.modalBtnCreateText}>{projectModalTab === 'load' ? 'Load' : 'Create'}</Text>
               </TouchableOpacity>
             </View>
           </View>

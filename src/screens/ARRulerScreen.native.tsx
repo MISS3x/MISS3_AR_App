@@ -648,56 +648,56 @@ export default function ARRulerScreen({ navigation }: any) {
            <Text style={styles.actionButtonText}>RESET</Text>
         </TouchableOpacity>
       </View>
-      
-      {/* Prompt */}
-      <View style={styles.promptOverlay}>
-        <Text style={[styles.promptText, { color: floorDetected || drawingMode !== 'floor' ? tronBlue : '#FFD700' }]}>
-            {prompt}
+
+      {/* Login badge — right below header */}
+      <View style={[styles.debugWindow, { top: insets.top + 36 }]}>
+        <Text style={styles.debugTitle}>
+          {userId ? `🟢 ${userEmail || 'Logged In'}` : '🔴 Anonymous'}
         </Text>
+        <Text style={styles.debugText}>Shapes: {shapeCount} | Pending: {pendingCount} | Synced: {uploadedCount}</Text>
+        <TouchableOpacity style={styles.syncBtn} onPress={syncMeasurements} disabled={isSyncing || pendingCount === 0}>
+          <Text style={styles.syncBtnText}>{isSyncing ? "Syncing..." : "Sync"}</Text>
+        </TouchableOpacity>
       </View>
+      
 
-      {/* Wire ON/OFF + DETECT — right side */}
-      <View style={{ position: 'absolute', right: 12, top: '35%', zIndex: 25, gap: 8 }}>
-        <TouchableOpacity 
-          style={[styles.wireToggle, { position: 'relative', right: 0, top: 0 }, showWire && styles.wireToggleActive]}
-          onPress={() => setShowWire(!showWire)}
-          activeOpacity={0.7}
-        >
-          <Text style={[styles.wireToggleText, showWire && { color: tronBlue }]}>
-            WIRE{"\n"}{showWire ? 'ON' : 'OFF'}
-          </Text>
-        </TouchableOpacity>
 
-        <TouchableOpacity 
-          style={[styles.wireToggle, { position: 'relative', right: 0, top: 0, borderColor: '#4CAF50' }]}
-          onPress={handleExportMesh}
-          activeOpacity={0.7}
-        >
-          <Text style={[styles.wireToggleText, { color: '#4CAF50' }]}>
-            EXPORT{"\n"}MESH
-          </Text>
-        </TouchableOpacity>
+      {/* Tool buttons — right side vertical (symmetric with FLOOR/FREE/WALL on left) */}
+      <View style={{ position: 'absolute', right: 12, bottom: insets.bottom + 100, zIndex: 15, gap: 6 }} pointerEvents="box-none">
+         <TouchableOpacity 
+           style={[styles.modeButton, showWire && { ...styles.modeButtonActive, borderColor: tronBlue, backgroundColor: 'rgba(51,204,255,0.15)' }]}
+           onPress={() => setShowWire(!showWire)}
+           activeOpacity={0.7}
+         >
+            <Text style={[styles.modeButtonText, showWire && { color: tronBlue }]}>WIRE</Text>
+         </TouchableOpacity>
 
-        <TouchableOpacity 
-          style={[styles.wireToggle, { position: 'relative', right: 0, top: 0 }, cutActive && { ...styles.wireToggleActive, borderColor: '#FF4D00' }]}
-          onPress={async () => {
-            if (cutActive) {
-              await rulerRef.current?.clearCut();
-              setCutActive(false);
-              setCutPointCount(0);
-              setPrompt('Cut cleared.');
-            } else {
-              setCutActive(true);
-              await rulerRef.current?.setCutActive(true, cutType);
-              setPrompt(`Cut ${cutType} — adjust with controls`);
-            }
-          }}
-          activeOpacity={0.7}
-        >
-          <Text style={[styles.wireToggleText, cutActive && { color: '#FF4D00' }]}>
-            CUT{"\n"}{cutActive ? 'ON' : 'OFF'}
-          </Text>
-        </TouchableOpacity>
+         <TouchableOpacity 
+           style={[styles.modeButton, { borderColor: '#4CAF50' }]}
+           onPress={handleExportMesh}
+           activeOpacity={0.7}
+         >
+            <Text style={[styles.modeButtonText, { color: '#4CAF50' }]}>EXPORT{"\n"}MESH</Text>
+         </TouchableOpacity>
+
+         <TouchableOpacity 
+           style={[styles.modeButton, cutActive && { ...styles.modeButtonActive, borderColor: '#FF4D00', backgroundColor: 'rgba(255,77,0,0.15)' }]}
+           onPress={async () => {
+             if (cutActive) {
+               await rulerRef.current?.clearCut();
+               setCutActive(false);
+               setCutPointCount(0);
+               setPrompt('Cut cleared.');
+             } else {
+               setCutActive(true);
+               await rulerRef.current?.setCutActive(true, cutType);
+               setPrompt(`Cut ${cutType} — adjust with controls`);
+             }
+           }}
+           activeOpacity={0.7}
+         >
+            <Text style={[styles.modeButtonText, cutActive && { color: '#FF4D00' }]}>CUT{"\n"}{cutActive ? 'ON' : 'OFF'}</Text>
+         </TouchableOpacity>
       </View>
 
       {/* Cut Room controls — only when CUT=ON */}
@@ -813,24 +813,16 @@ export default function ARRulerScreen({ navigation }: any) {
          </TouchableOpacity>
       </View>
       
-      {/* Debug */}
-      <View style={[styles.debugWindow, { top: insets.top + 160 }]}>
-        <Text style={styles.debugTitle}>
-          {userId ? `🟢 ${userEmail || 'Logged In'}` : '🔴 Anonymous'}
-        </Text>
-        <Text style={styles.debugText}>Shapes: {shapeCount} | Pending: {pendingCount} | Synced: {uploadedCount}</Text>
-        <TouchableOpacity style={styles.syncBtn} onPress={syncMeasurements} disabled={isSyncing || pendingCount === 0}>
-          <Text style={styles.syncBtnText}>{isSyncing ? "Syncing..." : "Sync"}</Text>
-        </TouchableOpacity>
-      </View>
+
 
       {/* Bottom */}
       <View style={[styles.bottomPanel, { paddingBottom: insets.bottom + spacing.lg }]}>
-         <View style={styles.measureBox}>
-            <Text style={styles.measureValue}>{roomHeight ? roomHeight.toFixed(2) : '--'}<Text style={styles.measureUnit}> m</Text></Text>
-            <Text style={styles.measureLabel}>Height</Text>
+         {/* Prompt / Message row */}
+         <View style={{ flex: 1, paddingHorizontal: spacing.sm, justifyContent: 'center' }}>
+            <Text style={[styles.promptText, { color: floorDetected || drawingMode !== 'floor' ? tronBlue : '#FFD700', fontSize: 11, textAlign: 'center' }]} numberOfLines={2}>
+              {prompt}
+            </Text>
          </View>
-         <View style={styles.measureDivider} />
          {pointCount >= 3 ? (
              <View style={{ flexDirection: 'row', flex: 1, gap: 6, marginHorizontal: spacing.sm, alignItems: 'center' }}>
                <TouchableOpacity 

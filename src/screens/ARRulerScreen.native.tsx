@@ -382,6 +382,11 @@ export default function ARRulerScreen({ navigation }: any) {
           setPendingCount(prev => Math.max(0, prev - 1));
           setUploadedCount(prev => prev + 1);
         }
+        addLog(`📐 Shape ${shapeNum} synced instantly`);
+        // Also sync CAD data (bounding boxes) immediately — lightweight
+        try { await syncCADData(); } catch (e) { /* non-critical */ }
+      } else {
+        addLog(`⚠️ Shape sync failed: ${error.message}`);
       }
     }
   };

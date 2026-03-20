@@ -61,8 +61,8 @@ public class ObjectCaptureNativeModule: Module {
         let outputUrl = outputDir.appendingPathComponent("model_\(UUID().uuidString).usdz")
         
         do {
-            // Use lowest detail to avoid massive 100MB OBJs
-            var req = PhotogrammetrySession.Request.modelFile(url: outputUrl, detail: .reduced)
+            // iOS only supports .reduced detail (default), no need to specify
+            var req = PhotogrammetrySession.Request.modelFile(url: outputUrl)
             var config = PhotogrammetrySession.Configuration()
             config.isObjectMaskingEnabled = true // Auto-mask the object
             

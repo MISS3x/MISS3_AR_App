@@ -63,14 +63,27 @@ export default function ARRulerScreen({ navigation }: any) {
   const [uploadedCount, setUploadedCount] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
 
-  // Debug
+  // Debug & Sync Controls
   const [chunkSizeMB, setChunkSizeMB] = useState(10);
-  const [debugLogs, setDebugLogs] = useState<string[]>([]);
   const [showDebugPanel, setShowDebugPanel] = useState(true);
+  // Per-category auto-sync toggles
+  const [autoSyncMeasurements, setAutoSyncMeasurements] = useState(true);
+  const [autoSyncBoundingBoxes, setAutoSyncBoundingBoxes] = useState(true);
+  const [autoSyncMeshes, setAutoSyncMeshes] = useState(false); // mesh only on chunk size
+  // Per-category logs
+  const [logsM, setLogsM] = useState<string[]>([]); // measurements
+  const [logsB, setLogsB] = useState<string[]>([]); // bounding boxes
+  const [logsMesh, setLogsMesh] = useState<string[]>([]); // meshes
+  const [logsA, setLogsA] = useState<string[]>([]); // anchors (always on)
+  const [debugLogs, setDebugLogs] = useState<string[]>([]);
+  const ts = () => new Date().toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   const addLog = useCallback((msg: string) => {
-    const ts = new Date().toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    setDebugLogs(prev => [`[${ts}] ${msg}`, ...prev].slice(0, 30));
+    setDebugLogs(prev => [`[${ts()}] ${msg}`, ...prev].slice(0, 30));
   }, []);
+  const addLogM = useCallback((msg: string) => { setLogsM(prev => [`[${ts()}] ${msg}`, ...prev].slice(0, 15)); }, []);
+  const addLogB = useCallback((msg: string) => { setLogsB(prev => [`[${ts()}] ${msg}`, ...prev].slice(0, 15)); }, []);
+  const addLogMesh = useCallback((msg: string) => { setLogsMesh(prev => [`[${ts()}] ${msg}`, ...prev].slice(0, 15)); }, []);
+  const addLogA = useCallback((msg: string) => { setLogsA(prev => [`[${ts()}] ${msg}`, ...prev].slice(0, 15)); }, []);
 
   useEffect(() => {
     checkAuthAndShowFlow();
@@ -541,13 +554,46 @@ export default function ARRulerScreen({ navigation }: any) {
     }
   };
 
+  // 15s auto-sync timer for measurements + bounding boxes + anchors
   useEffect(() => {
-    if (!autoExportMesh || !projectData || !userId) return;
-    const interval = setInterval(() => {
-      performAutoSave();
-    }, 60000);
+    if (!projectData || !userId) return;
+    const interval = setInterval(async () => {
+      if (isSyncing) return;
+      
+      // Measurements (always if autoSyncMeasurements)
+      if (autoSyncMeasurements) {
+        try {
+          addLogM(`🔄 Auto-syncing...`);
+          await syncMeasurements();
+          addLogM(`✅ Synced`);
+        } catch (e: any) { addLogM(`❌ ${e.message}`); }
+      }
+      
+      // Bounding boxes (always if autoSyncBoundingBoxes)
+      if (autoSyncBoundingBoxes) {
+        try {
+          addLogB(`🔄 Auto-syncing CAD...`);
+          await syncCADData();
+          addLogB(`✅ CAD synced`);
+        } catch (e: any) { addLogB(`❌ ${e.message}`); }
+      }
+      
+      // Anchors (always on — can't disable)
+      try {
+        const mapUrl = await rulerRef.current?.saveWorldMap();
+        if (mapUrl) {
+          const mapFileName = `${userId}/${projectData.id}_anchor.map`;
+          const formDataMap = new FormData();
+          formDataMap.append('file', { uri: `file://${mapUrl}`, name: 'anchor.map', type: 'application/octet-stream' } as any);
+          await supabase.storage.from('mesh-scans').upload(mapFileName, formDataMap, { upsert: true });
+          await FileSystem.deleteAsync(mapUrl, { idempotent: true }).catch(() => {});
+          addLogA(`⚓ Anchor saved`);
+        }
+      } catch (e: any) { addLogA(`❌ ${e.message}`); }
+      
+    }, 15000);
     return () => clearInterval(interval);
-  }, [autoExportMesh, projectData, userId]);
+  }, [projectData, userId, autoSyncMeasurements, autoSyncBoundingBoxes, isSyncing]);
 
   const handleExportMesh = async () => {
     if (!userId || !projectData) {
@@ -916,78 +962,104 @@ export default function ARRulerScreen({ navigation }: any) {
          <View style={styles.measureDivider} />
       </View>
 
-      {/* ===== DEBUG LOG PANEL ===== */}
+      {/* ===== SYNC PANEL ===== */}
       <TouchableOpacity
         style={{ position: 'absolute', right: 12, top: insets.top + 50, zIndex: 100, backgroundColor: 'rgba(0,0,0,0.7)', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 }}
         onPress={() => setShowDebugPanel(!showDebugPanel)}
       >
-        <Text style={{ color: '#0f0', fontSize: 10, fontFamily: 'monospace' }}>{showDebugPanel ? '⚙ HIDE' : '⚙ LOG'}</Text>
+        <Text style={{ color: '#0f0', fontSize: 10, fontFamily: 'monospace' }}>{showDebugPanel ? '⚙ HIDE' : '⚙ SYNC'}</Text>
       </TouchableOpacity>
 
       {showDebugPanel && (
-        <View style={{ position: 'absolute', right: 12, top: insets.top + 80, width: 260, maxHeight: 300, backgroundColor: 'rgba(0,0,0,0.85)', borderRadius: 10, padding: 8, zIndex: 99, borderWidth: 1, borderColor: 'rgba(0,255,100,0.3)' }}>
-          {/* Chunk Size Control */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6, gap: 4 }}>
-            <Text style={{ color: '#0f0', fontSize: 10, fontFamily: 'monospace', flex: 1 }}>CHUNK: {chunkSizeMB}MB</Text>
-            <TouchableOpacity
-              onPress={() => setChunkSizeMB(Math.max(1, chunkSizeMB - 5))}
-              style={{ backgroundColor: 'rgba(255,100,100,0.3)', borderRadius: 4, paddingHorizontal: 8, paddingVertical: 2 }}
-            >
-              <Text style={{ color: '#f66', fontSize: 12, fontWeight: 'bold' }}>-5</Text>
+        <ScrollView style={{ position: 'absolute', right: 12, top: insets.top + 80, width: 270, maxHeight: 420, backgroundColor: 'rgba(0,0,0,0.9)', borderRadius: 10, padding: 8, zIndex: 99, borderWidth: 1, borderColor: 'rgba(0,255,100,0.3)' }}>
+          
+          {/* 1. MEASUREMENTS */}
+          <TouchableOpacity
+            onPress={() => setAutoSyncMeasurements(!autoSyncMeasurements)}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}
+          >
+            <View style={{ width: 14, height: 14, borderRadius: 7, borderWidth: 2, borderColor: autoSyncMeasurements ? '#33CCFF' : '#666', alignItems: 'center', justifyContent: 'center' }}>
+              {autoSyncMeasurements && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#33CCFF' }} />}
+            </View>
+            <Text style={{ color: autoSyncMeasurements ? '#33CCFF' : '#888', fontSize: 10, fontWeight: 'bold', fontFamily: 'monospace', flex: 1 }}>📐 MEASUREMENTS (15s)</Text>
+            <Text style={{ color: '#555', fontSize: 8, fontFamily: 'monospace' }}>floor/wall/free</Text>
+          </TouchableOpacity>
+          {logsM.length > 0 && logsM.slice(0, 3).map((l, i) => (
+            <Text key={`m${i}`} style={{ color: l.includes('❌') ? '#f66' : '#8cf', fontSize: 8, fontFamily: 'monospace', paddingLeft: 20, marginBottom: 1 }}>{l}</Text>
+          ))}
+
+          <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.1)', marginVertical: 4 }} />
+
+          {/* 2. BOUNDING BOXES */}
+          <TouchableOpacity
+            onPress={() => setAutoSyncBoundingBoxes(!autoSyncBoundingBoxes)}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}
+          >
+            <View style={{ width: 14, height: 14, borderRadius: 7, borderWidth: 2, borderColor: autoSyncBoundingBoxes ? '#4CAF50' : '#666', alignItems: 'center', justifyContent: 'center' }}>
+              {autoSyncBoundingBoxes && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#4CAF50' }} />}
+            </View>
+            <Text style={{ color: autoSyncBoundingBoxes ? '#4CAF50' : '#888', fontSize: 10, fontWeight: 'bold', fontFamily: 'monospace', flex: 1 }}>🏠 BOUNDING BOXES (15s)</Text>
+          </TouchableOpacity>
+          {logsB.length > 0 && logsB.slice(0, 3).map((l, i) => (
+            <Text key={`b${i}`} style={{ color: l.includes('❌') ? '#f66' : '#8f8', fontSize: 8, fontFamily: 'monospace', paddingLeft: 20, marginBottom: 1 }}>{l}</Text>
+          ))}
+
+          <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.1)', marginVertical: 4 }} />
+
+          {/* 3. MESHES */}
+          <TouchableOpacity
+            onPress={() => setAutoSyncMeshes(!autoSyncMeshes)}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}
+          >
+            <View style={{ width: 14, height: 14, borderRadius: 7, borderWidth: 2, borderColor: autoSyncMeshes ? '#FF9800' : '#666', alignItems: 'center', justifyContent: 'center' }}>
+              {autoSyncMeshes && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#FF9800' }} />}
+            </View>
+            <Text style={{ color: autoSyncMeshes ? '#FF9800' : '#888', fontSize: 10, fontWeight: 'bold', fontFamily: 'monospace', flex: 1 }}>📦 MESHES (on size)</Text>
+          </TouchableOpacity>
+          {/* Chunk size controls */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', paddingLeft: 20, marginBottom: 4, gap: 4 }}>
+            <Text style={{ color: '#FF9800', fontSize: 9, fontFamily: 'monospace' }}>CHUNK: {chunkSizeMB}MB</Text>
+            <TouchableOpacity onPress={() => setChunkSizeMB(Math.max(1, chunkSizeMB - 5))} style={{ backgroundColor: 'rgba(255,100,100,0.3)', borderRadius: 3, paddingHorizontal: 5, paddingVertical: 1 }}>
+              <Text style={{ color: '#f66', fontSize: 10, fontWeight: 'bold' }}>-5</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => setChunkSizeMB(Math.max(1, chunkSizeMB - 1))}
-              style={{ backgroundColor: 'rgba(255,100,100,0.2)', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}
-            >
-              <Text style={{ color: '#f99', fontSize: 12 }}>-1</Text>
+            <TouchableOpacity onPress={() => setChunkSizeMB(Math.max(1, chunkSizeMB - 1))} style={{ backgroundColor: 'rgba(255,100,100,0.2)', borderRadius: 3, paddingHorizontal: 4, paddingVertical: 1 }}>
+              <Text style={{ color: '#f99', fontSize: 10 }}>-1</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => setChunkSizeMB(Math.min(50, chunkSizeMB + 1))}
-              style={{ backgroundColor: 'rgba(100,255,100,0.2)', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}
-            >
-              <Text style={{ color: '#9f9', fontSize: 12 }}>+1</Text>
+            <TouchableOpacity onPress={() => setChunkSizeMB(Math.min(50, chunkSizeMB + 1))} style={{ backgroundColor: 'rgba(100,255,100,0.2)', borderRadius: 3, paddingHorizontal: 4, paddingVertical: 1 }}>
+              <Text style={{ color: '#9f9', fontSize: 10 }}>+1</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => setChunkSizeMB(Math.min(50, chunkSizeMB + 5))}
-              style={{ backgroundColor: 'rgba(100,255,100,0.3)', borderRadius: 4, paddingHorizontal: 8, paddingVertical: 2 }}
-            >
-              <Text style={{ color: '#6f6', fontSize: 12, fontWeight: 'bold' }}>+5</Text>
+            <TouchableOpacity onPress={() => setChunkSizeMB(Math.min(50, chunkSizeMB + 5))} style={{ backgroundColor: 'rgba(100,255,100,0.3)', borderRadius: 3, paddingHorizontal: 5, paddingVertical: 1 }}>
+              <Text style={{ color: '#6f6', fontSize: 10, fontWeight: 'bold' }}>+5</Text>
             </TouchableOpacity>
           </View>
-          {/* Auto-sync PAUSE/PLAY */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6, gap: 4 }}>
-            <TouchableOpacity
-              onPress={() => setAutoExportMesh(!autoExportMesh)}
-              style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: autoExportMesh ? 'rgba(100,255,100,0.15)' : 'rgba(255,100,100,0.15)', borderRadius: 6, paddingVertical: 6, borderWidth: 1, borderColor: autoExportMesh ? 'rgba(0,255,100,0.4)' : 'rgba(255,100,100,0.4)' }}
-            >
-              <Text style={{ fontSize: 16 }}>{autoExportMesh ? '⏸' : '▶️'}</Text>
-              <Text style={{ color: autoExportMesh ? '#6f6' : '#f66', fontSize: 11, fontWeight: 'bold', fontFamily: 'monospace' }}>
-                {autoExportMesh ? 'PAUSE' : 'PLAY'}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => { addLog('🔄 MANUAL SYNC triggered'); performAutoSave(); }}
-              disabled={isSyncing || !userId || !projectData}
-              style={{ paddingHorizontal: 10, paddingVertical: 6, backgroundColor: isSyncing ? 'rgba(255,255,0,0.15)' : 'rgba(0,150,255,0.2)', borderRadius: 6, borderWidth: 1, borderColor: isSyncing ? 'rgba(255,255,0,0.4)' : 'rgba(0,150,255,0.4)' }}
-            >
-              <Text style={{ color: isSyncing ? '#ff0' : '#09f', fontSize: 11, fontWeight: 'bold', fontFamily: 'monospace' }}>
-                {isSyncing ? '🔄' : 'SYNC'}
-              </Text>
-            </TouchableOpacity>
+          {logsMesh.length > 0 && logsMesh.slice(0, 3).map((l, i) => (
+            <Text key={`mesh${i}`} style={{ color: l.includes('❌') ? '#f66' : '#fc8', fontSize: 8, fontFamily: 'monospace', paddingLeft: 20, marginBottom: 1 }}>{l}</Text>
+          ))}
+
+          <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.1)', marginVertical: 4 }} />
+
+          {/* 4. ANCHORS (always on) */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <View style={{ width: 14, height: 14, borderRadius: 7, borderWidth: 2, borderColor: '#9C27B0', alignItems: 'center', justifyContent: 'center' }}>
+              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#9C27B0' }} />
+            </View>
+            <Text style={{ color: '#CE93D8', fontSize: 10, fontWeight: 'bold', fontFamily: 'monospace' }}>⚓ ANCHORS (always on)</Text>
           </View>
-          <Text style={{ color: '#666', fontSize: 8, fontFamily: 'monospace', marginBottom: 4 }}>
-            Auto: {autoExportMesh ? '60s' : 'OFF'} | Chunk: {chunkSizeMB}MB | {isSyncing ? 'SYNCING...' : 'IDLE'}
-          </Text>
-          {/* Logs */}
-          <ScrollView style={{ maxHeight: 220 }} showsVerticalScrollIndicator={false}>
-            {debugLogs.map((log, i) => (
-              <Text key={i} style={{ color: log.includes('❌') ? '#f66' : log.includes('✅') ? '#6f6' : log.includes('⚠') ? '#ff0' : '#ccc', fontSize: 9, fontFamily: 'monospace', marginBottom: 1 }}>
-                {log}
-              </Text>
-            ))}
-            {debugLogs.length === 0 && <Text style={{ color: '#666', fontSize: 9, fontFamily: 'monospace' }}>No logs yet. Export mesh to see activity.</Text>}
-          </ScrollView>
-        </View>
+          {logsA.length > 0 && logsA.slice(0, 3).map((l, i) => (
+            <Text key={`a${i}`} style={{ color: l.includes('❌') ? '#f66' : '#c8f', fontSize: 8, fontFamily: 'monospace', paddingLeft: 20, marginBottom: 1 }}>{l}</Text>
+          ))}
+
+          {/* Manual SYNC ALL button */}
+          <TouchableOpacity
+            onPress={() => { addLog('🔄 MANUAL SYNC ALL'); performAutoSave(); }}
+            disabled={isSyncing || !userId || !projectData}
+            style={{ marginTop: 6, paddingVertical: 6, backgroundColor: isSyncing ? 'rgba(255,255,0,0.15)' : 'rgba(0,150,255,0.2)', borderRadius: 6, borderWidth: 1, borderColor: isSyncing ? 'rgba(255,255,0,0.4)' : 'rgba(0,150,255,0.4)', alignItems: 'center' }}
+          >
+            <Text style={{ color: isSyncing ? '#ff0' : '#09f', fontSize: 11, fontWeight: 'bold', fontFamily: 'monospace' }}>
+              {isSyncing ? '🔄 SYNCING...' : '⬆ SYNC ALL NOW'}
+            </Text>
+          </TouchableOpacity>
+        </ScrollView>
       )}
 
       {/* ===== LOGIN MODAL ===== */}

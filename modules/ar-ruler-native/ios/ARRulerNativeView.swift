@@ -2011,16 +2011,18 @@ class RoomPlanController: NSObject, RoomCaptureSessionDelegate {
             roomNodes.append(node)
         }
         
-        // Render floors
-        for floor in room.floors {
-            let node = createBoxNode(
-                dimensions: floor.dimensions,
-                transform: floor.transform,
-                color: floorColor,
-                label: "Floor"
-            )
-            roomRootNode.addChildNode(node)
-            roomNodes.append(node)
+        // Render floors (iOS 17+)
+        if #available(iOS 17.0, *) {
+            for floor in room.floors {
+                let node = createBoxNode(
+                    dimensions: floor.dimensions,
+                    transform: floor.transform,
+                    color: floorColor,
+                    label: "Floor"
+                )
+                roomRootNode.addChildNode(node)
+                roomNodes.append(node)
+            }
         }
         
         // Render objects (furniture)
@@ -2130,8 +2132,10 @@ class RoomPlanController: NSObject, RoomCaptureSessionDelegate {
         }
         
         var floors: [[String: Any]] = []
-        for floor in room.floors {
-            floors.append(surfaceToDict(id: floor.identifier, dimensions: floor.dimensions, transform: floor.transform, category: "floor"))
+        if #available(iOS 17.0, *) {
+            for floor in room.floors {
+                floors.append(surfaceToDict(id: floor.identifier, dimensions: floor.dimensions, transform: floor.transform, category: "floor"))
+            }
         }
         
         var objects: [[String: Any]] = []

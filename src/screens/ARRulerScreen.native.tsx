@@ -81,9 +81,14 @@ export default function ARRulerScreen({ navigation }: any) {
     if (session?.user) {
       setUserId(session.user.id);
       setUserEmail(session.user.email || null);
-      setShowProjectModal(true); // Logged in → show project modal
+      // Only show project modal if no project is loaded yet
+      if (!projectData) {
+        setShowProjectModal(true); // Logged in → show project modal
+      }
     } else {
-      setShowLoginModal(true); // Not logged in → show login first
+      if (!projectData) {
+        setShowLoginModal(true); // Not logged in → show login first
+      }
     }
   };
 

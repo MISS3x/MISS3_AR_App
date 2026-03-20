@@ -892,9 +892,29 @@ export default function ARRulerScreen({ navigation }: any) {
               <Text style={{ color: '#6f6', fontSize: 12, fontWeight: 'bold' }}>+5</Text>
             </TouchableOpacity>
           </View>
-          {/* Auto-sync timer info */}
-          <Text style={{ color: '#aaa', fontSize: 9, fontFamily: 'monospace', marginBottom: 4 }}>
-            Auto-sync: {autoExportMesh ? '60s interval' : 'OFF'} | Syncing: {isSyncing ? '🔄' : '⏸'}
+          {/* Auto-sync PAUSE/PLAY */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6, gap: 4 }}>
+            <TouchableOpacity
+              onPress={() => setAutoExportMesh(!autoExportMesh)}
+              style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: autoExportMesh ? 'rgba(100,255,100,0.15)' : 'rgba(255,100,100,0.15)', borderRadius: 6, paddingVertical: 6, borderWidth: 1, borderColor: autoExportMesh ? 'rgba(0,255,100,0.4)' : 'rgba(255,100,100,0.4)' }}
+            >
+              <Text style={{ fontSize: 16 }}>{autoExportMesh ? '⏸' : '▶️'}</Text>
+              <Text style={{ color: autoExportMesh ? '#6f6' : '#f66', fontSize: 11, fontWeight: 'bold', fontFamily: 'monospace' }}>
+                {autoExportMesh ? 'PAUSE' : 'PLAY'}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => { addLog('🔄 MANUAL SYNC triggered'); performAutoSave(); }}
+              disabled={isSyncing || !userId || !projectData}
+              style={{ paddingHorizontal: 10, paddingVertical: 6, backgroundColor: isSyncing ? 'rgba(255,255,0,0.15)' : 'rgba(0,150,255,0.2)', borderRadius: 6, borderWidth: 1, borderColor: isSyncing ? 'rgba(255,255,0,0.4)' : 'rgba(0,150,255,0.4)' }}
+            >
+              <Text style={{ color: isSyncing ? '#ff0' : '#09f', fontSize: 11, fontWeight: 'bold', fontFamily: 'monospace' }}>
+                {isSyncing ? '🔄' : 'SYNC'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+          <Text style={{ color: '#666', fontSize: 8, fontFamily: 'monospace', marginBottom: 4 }}>
+            Auto: {autoExportMesh ? '60s' : 'OFF'} | Chunk: {chunkSizeMB}MB | {isSyncing ? 'SYNCING...' : 'IDLE'}
           </Text>
           {/* Logs */}
           <ScrollView style={{ maxHeight: 220 }} showsVerticalScrollIndicator={false}>

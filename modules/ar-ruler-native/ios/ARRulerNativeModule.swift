@@ -61,9 +61,9 @@ public class ARRulerNativeModule: Module {
         }
       }
 
-      AsyncFunction("exportMeshChunks") { (view: ARRulerNativeView) -> [[String: Any]] in
+      AsyncFunction("exportMeshChunks") { (view: ARRulerNativeView, maxSizeMB: Int) -> [[String: Any]] in
         if #available(iOS 13.4, *) {
-          return view.exportMeshChunks()
+          return view.exportMeshChunks(maxSizeMB: maxSizeMB)
         } else {
           return [["error": "iOS 13.4+ required for mesh export"]]
         }

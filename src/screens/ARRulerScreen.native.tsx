@@ -1,5 +1,5 @@
-import React, { useRef, useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, Modal, TextInput, ActivityIndicator, Switch, FlatList } from 'react-native';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Modal, TextInput, ActivityIndicator, Switch, FlatList, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // SegmentedControl removed — mode buttons are now inline with + button
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -62,6 +62,15 @@ export default function ARRulerScreen({ navigation }: any) {
   const [pendingCount, setPendingCount] = useState(0);
   const [uploadedCount, setUploadedCount] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
+
+  // Debug
+  const [chunkSizeMB, setChunkSizeMB] = useState(10);
+  const [debugLogs, setDebugLogs] = useState<string[]>([]);
+  const [showDebugPanel, setShowDebugPanel] = useState(true);
+  const addLog = useCallback((msg: string) => {
+    const ts = new Date().toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    setDebugLogs(prev => [`[${ts}] ${msg}`, ...prev].slice(0, 30));
+  }, []);
 
   useEffect(() => {
     checkAuthAndShowFlow();
@@ -416,24 +425,37 @@ export default function ARRulerScreen({ navigation }: any) {
   const performAutoSave = async () => {
     if (!userId || !projectData || isSyncing) return;
     setIsSyncing(true);
+    addLog(`⏱ AUTO-SYNC START (chunk=${chunkSizeMB}MB)`);
     try {
-      const chunks = await rulerRef.current?.exportMeshChunks();
+      // 1. Export mesh chunks
+      addLog(`📦 Exporting mesh chunks (max ${chunkSizeMB}MB each)...`);
+      const chunks = await rulerRef.current?.exportMeshChunks(chunkSizeMB);
       if (chunks && chunks.length > 0 && !chunks[0].error) {
+        addLog(`✅ Got ${chunks.length} chunks`);
         for (let i = 0; i < chunks.length; i++) {
           const chunk = chunks[i];
+          const sizeMB = (chunk.byteSize / 1048576).toFixed(2);
+          addLog(`  📤 Chunk ${i+1}/${chunks.length}: ${chunk.vertexCount}v ${chunk.faceCount}f ${sizeMB}MB`);
           const fileName = `${userId}/${projectData.id}_chunk_${i}.obj`;
           const fileUri = `${FileSystem.documentDirectory}temp_mesh_${Date.now()}_${i}.obj`;
           await FileSystem.writeAsStringAsync(fileUri, chunk.obj, { encoding: 'utf8' });
-          
           const formData = new FormData();
           formData.append('file', { uri: fileUri, name: `chunk_${i}.obj`, type: 'model/obj' } as any);
           await supabase.storage.from('mesh-scans').upload(fileName, formData, { upsert: true });
           await FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => {});
+          addLog(`  ✅ Chunk ${i+1} uploaded`);
         }
+      } else {
+        addLog(`⚠️ No mesh data: ${chunks?.[0]?.error || 'empty'}`);
       }
-      
+
+      // 2. Sync CAD data (bounding boxes, planes)
+      addLog(`🏠 Syncing CAD data (boxes, planes)...`);
       await syncCADData();
-      
+      addLog(`✅ CAD data synced`);
+
+      // 3. Save world anchor
+      addLog(`⚓ Saving AR Anchor Map...`);
       const mapUrl = await rulerRef.current?.saveWorldMap();
       if (mapUrl) {
         const mapFileName = `${userId}/${projectData.id}_anchor.map`;
@@ -441,8 +463,13 @@ export default function ARRulerScreen({ navigation }: any) {
         formDataMap.append('file', { uri: `file://${mapUrl}`, name: 'anchor.map', type: 'application/octet-stream' } as any);
         await supabase.storage.from('mesh-scans').upload(mapFileName, formDataMap, { upsert: true });
         await FileSystem.deleteAsync(mapUrl, { idempotent: true }).catch(() => {});
+        addLog(`✅ Anchor map uploaded`);
+      } else {
+        addLog(`⚠️ No anchor map to save`);
       }
-    } catch (e) {
+      addLog(`🎉 AUTO-SYNC COMPLETE`);
+    } catch (e: any) {
+      addLog(`❌ Auto-save error: ${e.message || e}`);
       console.log("Auto-save error:", e);
     } finally {
       setIsSyncing(false);
@@ -464,7 +491,8 @@ export default function ARRulerScreen({ navigation }: any) {
     }
     setPrompt("Exporting meshes and anchor...");
     try {
-      const chunks = await rulerRef.current?.exportMeshChunks();
+      addLog(`📦 MANUAL EXPORT (chunk=${chunkSizeMB}MB)...`);
+      const chunks = await rulerRef.current?.exportMeshChunks(chunkSizeMB);
       if (!chunks || chunks.length === 0 || chunks[0].error) {
         Alert.alert("Error", chunks?.[0]?.error || "Mesh export failed");
         setPrompt("Mesh export failed.");
@@ -833,6 +861,60 @@ export default function ARRulerScreen({ navigation }: any) {
          )}
          <View style={styles.measureDivider} />
       </View>
+
+      {/* ===== DEBUG LOG PANEL ===== */}
+      <TouchableOpacity
+        style={{ position: 'absolute', right: 12, top: insets.top + 50, zIndex: 100, backgroundColor: 'rgba(0,0,0,0.7)', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 }}
+        onPress={() => setShowDebugPanel(!showDebugPanel)}
+      >
+        <Text style={{ color: '#0f0', fontSize: 10, fontFamily: 'monospace' }}>{showDebugPanel ? '⚙ HIDE' : '⚙ LOG'}</Text>
+      </TouchableOpacity>
+
+      {showDebugPanel && (
+        <View style={{ position: 'absolute', right: 12, top: insets.top + 80, width: 260, maxHeight: 300, backgroundColor: 'rgba(0,0,0,0.85)', borderRadius: 10, padding: 8, zIndex: 99, borderWidth: 1, borderColor: 'rgba(0,255,100,0.3)' }}>
+          {/* Chunk Size Control */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6, gap: 4 }}>
+            <Text style={{ color: '#0f0', fontSize: 10, fontFamily: 'monospace', flex: 1 }}>CHUNK: {chunkSizeMB}MB</Text>
+            <TouchableOpacity
+              onPress={() => setChunkSizeMB(Math.max(1, chunkSizeMB - 5))}
+              style={{ backgroundColor: 'rgba(255,100,100,0.3)', borderRadius: 4, paddingHorizontal: 8, paddingVertical: 2 }}
+            >
+              <Text style={{ color: '#f66', fontSize: 12, fontWeight: 'bold' }}>-5</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setChunkSizeMB(Math.max(1, chunkSizeMB - 1))}
+              style={{ backgroundColor: 'rgba(255,100,100,0.2)', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}
+            >
+              <Text style={{ color: '#f99', fontSize: 12 }}>-1</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setChunkSizeMB(Math.min(50, chunkSizeMB + 1))}
+              style={{ backgroundColor: 'rgba(100,255,100,0.2)', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}
+            >
+              <Text style={{ color: '#9f9', fontSize: 12 }}>+1</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setChunkSizeMB(Math.min(50, chunkSizeMB + 5))}
+              style={{ backgroundColor: 'rgba(100,255,100,0.3)', borderRadius: 4, paddingHorizontal: 8, paddingVertical: 2 }}
+            >
+              <Text style={{ color: '#6f6', fontSize: 12, fontWeight: 'bold' }}>+5</Text>
+            </TouchableOpacity>
+          </View>
+          {/* Auto-sync timer info */}
+          <Text style={{ color: '#aaa', fontSize: 9, fontFamily: 'monospace', marginBottom: 4 }}>
+            Auto-sync: {autoExportMesh ? '60s interval' : 'OFF'} | Syncing: {isSyncing ? '🔄' : '⏸'}
+          </Text>
+          {/* Logs */}
+          <ScrollView style={{ maxHeight: 220 }} showsVerticalScrollIndicator={false}>
+            {debugLogs.map((log, i) => (
+              <Text key={i} style={{ color: log.includes('❌') ? '#f66' : log.includes('✅') ? '#6f6' : log.includes('⚠') ? '#ff0' : '#ccc', fontSize: 9, fontFamily: 'monospace', marginBottom: 1 }}>
+                {log}
+              </Text>
+            ))}
+            {debugLogs.length === 0 && <Text style={{ color: '#666', fontSize: 9, fontFamily: 'monospace' }}>No logs yet. Export mesh to see activity.</Text>}
+          </ScrollView>
+        </View>
+      )}
 
       {/* ===== LOGIN MODAL ===== */}
       <Modal visible={showLoginModal} transparent animationType="fade">

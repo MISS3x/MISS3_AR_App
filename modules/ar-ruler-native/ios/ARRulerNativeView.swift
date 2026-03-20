@@ -900,13 +900,13 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   }
 
   @available(iOS 13.4, *)
-  func exportMeshChunks() -> [[String: Any]] {
+  func exportMeshChunks(maxSizeMB: Int = 10) -> [[String: Any]] {
     guard let session = arView.session.currentFrame else { return [["error": "No AR frame"]] }
     let anchors = session.anchors.compactMap { $0 as? ARMeshAnchor }
     guard !anchors.isEmpty else { return [["error": "No mesh data"]] }
     
     var chunks: [[String: Any]] = []
-    let maxSize = 45 * 1024 * 1024 // 45MB threshold
+    let maxSize = maxSizeMB * 1024 * 1024
     
     var currentObj = "# MISS3 AR Mesh Export Chunk\n\n"
     var currentVertexOffset = 0

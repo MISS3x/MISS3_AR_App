@@ -118,6 +118,14 @@ public class ARRulerNativeModule: Module {
       AsyncFunction("clearCut") { (view: ARRulerNativeView) in
         view.clearCut()
       }
+
+      AsyncFunction("loadShapes") { (view: ARRulerNativeView, shapes: [[String: Any]]) -> Int in
+        return view.loadShapes(shapes: shapes)
+      }
+
+      AsyncFunction("loadBoundingBoxes") { (view: ARRulerNativeView, boxes: [[String: Any]]) -> Int in
+        return view.loadBoundingBoxes(boxes: boxes)
+      }
     }
   }
 }

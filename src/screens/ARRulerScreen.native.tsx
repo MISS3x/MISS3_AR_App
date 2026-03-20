@@ -158,7 +158,9 @@ export default function ARRulerScreen({ navigation }: any) {
         setProjectData({ id: p.id, name: p.name });
         setShowProjectModal(false);
         setPrompt("Downloading AR Anchor...");
+        addLog(`📂 Loading project: ${p.name}`);
         
+        // 1. Load anchor map
         const { data, error } = await supabase.storage.from('mesh-scans').download(`${userId}/${p.id}_anchor.map`);
         if (data) {
            const fileUri = `${FileSystem.documentDirectory}temp_load_${Date.now()}.map`;
@@ -168,15 +170,63 @@ export default function ARRulerScreen({ navigation }: any) {
              await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
              try {
                 await rulerRef.current?.loadWorldMap(fileUri);
-                setPrompt("Anchor localized! Resuming project.");
+                setPrompt("Anchor localized! Loading data...");
+                addLog(`✅ Anchor map loaded`);
              } catch (e) {
                 console.log("Load map error:", e);
                 setPrompt("Failed to inject tracking anchor.");
+                addLog(`❌ Anchor load failed: ${e}`);
              }
            };
            reader.readAsDataURL(data);
         } else {
-           setPrompt("No anchor map found. Start fresh.");
+           setPrompt("No anchor map found. Loading data without anchor...");
+           addLog(`⚠️ No anchor map, loading shapes anyway`);
+        }
+
+        // 2. Load measurements (shapes)
+        let loadedShapeCount = 0;
+        try {
+          setPrompt("Loading saved measurements...");
+          addLog(`📐 Fetching measurements...`);
+          const { data: measurements } = await supabase
+            .from('ar_measurements')
+            .select('*')
+            .eq('project_id', p.id)
+            .order('created_at', { ascending: true });
+          
+          if (measurements && measurements.length > 0) {
+            const loadedCount = await rulerRef.current?.loadShapes(measurements);
+            loadedShapeCount = measurements.length;
+            addLog(`✅ Loaded ${loadedCount || measurements.length} shapes`);
+            setShapeCount(measurements.length);
+            setUploadedCount(measurements.length);
+          } else {
+            addLog(`📐 No saved measurements found`);
+          }
+        } catch (e: any) {
+          addLog(`❌ Measurements load error: ${e.message}`);
+        }
+
+        // 3. Load bounding boxes (RoomPlan gizmos)
+        try {
+          addLog(`🏠 Fetching bounding boxes...`);
+          const { data: boxes } = await supabase
+            .from('ar_bounding_boxes')
+            .select('*')
+            .eq('project_id', p.id);
+          
+          if (boxes && boxes.length > 0) {
+            const gizmoCount = await rulerRef.current?.loadBoundingBoxes(boxes);
+            addLog(`✅ Loaded ${gizmoCount || boxes.length} gizmos (${boxes.map((b: any) => b.class_name).join(', ')})`);
+            setPrompt(`Project loaded! ${loadedShapeCount} shapes, ${boxes.length} objects`);
+          } else {
+            addLog(`🏠 No bounding boxes found`);
+            setPrompt(`Project loaded! ${loadedShapeCount} shapes`);
+          }
+        } catch (e: any) {
+          addLog(`❌ Bounding boxes load error: ${e.message}`);
+          setPrompt("Project loaded with some errors.");
         }
       }
     }

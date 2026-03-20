@@ -1186,6 +1186,114 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
     }
   }
 
+  // MARK: - Load Shapes from Supabase
+  func loadShapes(shapes: [[String: Any]]) -> Int {
+    var count = 0
+    for shape in shapes {
+      guard let payload = shape["payload"] as? [String: Any],
+            let pointsArr = payload["points"] as? [[String: Any]] else { continue }
+      
+      let shapeType = payload["type"] as? String ?? "floor"
+      let color: UIColor
+      switch shapeType {
+      case "wall": color = wallPink
+      case "levels", "line": color = levelsGreen
+      default: color = tronBlue
+      }
+      
+      var positions: [SCNVector3] = []
+      for pt in pointsArr {
+        let x = (pt["x"] as? Float) ?? Float(pt["x"] as? Double ?? 0)
+        let y = (pt["y"] as? Float) ?? Float(pt["y"] as? Double ?? 0)
+        let z = (pt["z"] as? Float) ?? Float(pt["z"] as? Double ?? 0)
+        positions.append(SCNVector3(x, y, z))
+      }
+      
+      // Draw points and lines
+      for (i, pos) in positions.enumerated() {
+        drawSphere(at: pos, color: color)
+        if i > 0 {
+          drawLine(from: positions[i-1], to: pos, color: color)
+        }
+      }
+      
+      // Close shape if it was a closed polygon (>= 3 points, type floor/wall)
+      if positions.count >= 3 && (shapeType == "floor" || shapeType == "wall") {
+        drawLine(from: positions.last!, to: positions.first!, color: color)
+      }
+      
+      // Draw area/length label at centroid
+      if let area = payload["area"] as? Double, positions.count > 0 {
+        let cx = positions.reduce(Float(0)) { $0 + $1.x } / Float(positions.count)
+        let cy = positions.reduce(Float(0)) { $0 + $1.y } / Float(positions.count)
+        let cz = positions.reduce(Float(0)) { $0 + $1.z } / Float(positions.count)
+        drawText(text: String(format: "%.2f m²", area), at: SCNVector3(cx, cy + 0.05, cz), scale: 0.004)
+      }
+      
+      count += 1
+    }
+    return count
+  }
+
+  // MARK: - Load Bounding Boxes (RoomPlan gizmos)
+  func loadBoundingBoxes(boxes: [[String: Any]]) -> Int {
+    var count = 0
+    for box in boxes {
+      let className = box["class_name"] as? String ?? "unknown"
+      let px = Float(box["position_x"] as? Double ?? 0)
+      let py = Float(box["position_y"] as? Double ?? 0)
+      let pz = Float(box["position_z"] as? Double ?? 0)
+      let w = Float(box["width"] as? Double ?? 0.5)
+      let h = Float(box["height"] as? Double ?? 0.5)
+      let d = Float(box["depth"] as? Double ?? 0.5)
+      
+      // Color based on classification
+      let color: UIColor
+      switch className {
+      case "window": color = UIColor.cyan
+      case "door": color = UIColor.orange
+      case "chair", "seat": color = UIColor.yellow
+      case "table": color = UIColor.green
+      case "bed": color = UIColor.purple
+      case "sofa": color = UIColor(red: 0.8, green: 0.4, blue: 0.1, alpha: 1.0)
+      case "storage": color = UIColor.brown
+      case "television": color = UIColor.blue
+      default: color = UIColor.white
+      }
+      
+      // Create wireframe box
+      let boxGeo = SCNBox(width: CGFloat(w), height: CGFloat(h), length: CGFloat(d), chamferRadius: 0)
+      boxGeo.firstMaterial?.fillMode = .lines
+      boxGeo.firstMaterial?.diffuse.contents = color
+      boxGeo.firstMaterial?.lightingModel = .constant
+      boxGeo.firstMaterial?.isDoubleSided = true
+      boxGeo.firstMaterial?.readsFromDepthBuffer = false
+      
+      let boxNode = SCNNode(geometry: boxGeo)
+      boxNode.position = SCNVector3(px, py, pz)
+      boxNode.renderingOrder = 90
+      boxNode.name = "gizmo_\(className)_\(count)"
+      
+      // Apply transform if available
+      if let transformArr = box["payload"] as? [Double], transformArr.count == 16 {
+        var m = SCNMatrix4Identity
+        m.m11 = Float(transformArr[0]); m.m12 = Float(transformArr[1]); m.m13 = Float(transformArr[2]); m.m14 = Float(transformArr[3])
+        m.m21 = Float(transformArr[4]); m.m22 = Float(transformArr[5]); m.m23 = Float(transformArr[6]); m.m24 = Float(transformArr[7])
+        m.m31 = Float(transformArr[8]); m.m32 = Float(transformArr[9]); m.m33 = Float(transformArr[10]); m.m34 = Float(transformArr[11])
+        m.m41 = Float(transformArr[12]); m.m42 = Float(transformArr[13]); m.m43 = Float(transformArr[14]); m.m44 = Float(transformArr[15])
+        boxNode.transform = m
+      }
+      
+      arView.scene.rootNode.addChildNode(boxNode)
+      
+      // Add label above the box
+      drawText(text: className.uppercased(), at: SCNVector3(px, py + h/2 + 0.05, pz), scale: 0.003)
+      
+      count += 1
+    }
+    return count
+  }
+
   // MARK: - Drawing Mode
   func setDrawingMode(mode: String) {
     if let dm = DrawingMode(rawValue: mode) {

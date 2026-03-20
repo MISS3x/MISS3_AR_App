@@ -451,26 +451,11 @@ export default function SandboxARScreen({ navigation }: any) {
         initialScene={{ scene: ARScene }} 
         viroAppProps={{ 
            placedObjects, setPlacedObjects, 
-           showMesh, planes, setPlanes,
+           planes, setPlanes,
            pendingModelContext, setPendingModelContext,
-           meshContour, meshVertices3D, showWire
         }}
         style={styles.viroContainer} 
         occlusionMode="depthBased"
-        worldMeshEnabled={showWire}
-        worldMeshConfig={{
-          stride: 1,
-          minConfidence: 0.3,
-          maxDepth: 5.0,
-          updateIntervalMs: 100,
-          debugDrawEnabled: false, // Turned off to remove the small red triangles
-        }}
-        onWorldMeshUpdated={(stats: any) => {
-          if (stats) {
-            setMeshStats(stats);
-            if (stats.vertexCount > 0) setHasLidar(true);
-          }
-        }}
       />
 
 

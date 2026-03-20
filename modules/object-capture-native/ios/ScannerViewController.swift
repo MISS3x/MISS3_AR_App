@@ -7,7 +7,7 @@ import os
 
 @available(iOS 17.0, *)
 struct ObjectCaptureViewWrapper: View {
-    @ObservedObject var session: ObjectCaptureSession
+    var session: ObjectCaptureSession
     var onStateChange: (String) -> Void
     
     @State private var showOverlayText: String = "Initializing..."
@@ -30,15 +30,14 @@ struct ObjectCaptureViewWrapper: View {
                 Spacer()
             }
         }
-        .onChange(of: session.state) { _, newState in
-            let stateStr = describeState(newState)
-            showOverlayText = stateStr
-            onStateChange(stateStr)
-            print("[ObjectCapture] State: \(stateStr)")
-        }
-        .onAppear {
-            print("[ObjectCapture] View appeared, session state: \(describeState(session.state))")
-            showOverlayText = describeState(session.state)
+        .task {
+            print("[ObjectCapture] View appeared, monitoring state...")
+            for await newState in session.stateUpdates {
+                let text: String = describeState(newState)
+                showOverlayText = text
+                onStateChange(text)
+                print("[ObjectCapture] State: \(text)")
+            }
         }
     }
     
@@ -127,7 +126,7 @@ class ScannerViewController: UIViewController {
         print("[ObjectCapture] Session created, initial state: \(session.state)")
         
         // 5. Create the SwiftUI ObjectCaptureView wrapper
-        let contentView = ObjectCaptureViewWrapper(session: session) { [weak self] stateStr in
+        let contentView = ObjectCaptureViewWrapper(session: session) { [weak self] (stateStr: String) in
             print("[ObjectCapture] State callback: \(stateStr)")
             
             if stateStr.contains("complete") {
@@ -145,7 +144,7 @@ class ScannerViewController: UIViewController {
         addChild(hostingController)
         view.addSubview(hostingController.view)
         hostingController.view.frame = view.bounds
-        hostingController.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        hostingController.view.autoresizingMask = UIView.AutoresizingMask([.flexibleWidth, .flexibleHeight])
         hostingController.didMove(toParent: self)
         
         // 6. Add a custom Close/Cancel button

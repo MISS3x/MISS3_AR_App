@@ -49,6 +49,7 @@ interface ARViewerScreenProps {
         position: { x: number; y: number; z: number };
         rotation: { x: number; y: number; z: number };
         scale: { x: number; y: number; z: number };
+        modelOffset?: { x: number; y: number; z: number };
       } | null;
     };
   };
@@ -60,7 +61,7 @@ interface ARViewerScreenProps {
 // 2) Viro AR Scene Component - Defined OUTSIDE main screen to prevent ARKit native context crashes
 const ARScene = (props: any) => {
   const {
-    localModelPath, initialScale, initialRotation, 
+    localModelPath, initialScale, initialRotation, initialModelOffset,
     showMesh, isTestCube, 
     objectPosition, setObjectPosition,
     isPlaced, setIsPlaced
@@ -295,7 +296,7 @@ const ARScene = (props: any) => {
                 const ext = localModelPath.split('.').pop()?.toUpperCase() || 'GLB';
                 return ext === 'GLTF' ? 'GLTF' : ext === 'OBJ' ? 'OBJ' : ext === 'VRX' ? 'VRX' : 'GLB';
               })()}
-              position={[0, yOffset, 0]}
+            position={[initialModelOffset[0], yOffset + initialModelOffset[1], initialModelOffset[2]]}
               scale={[1, 1, 1]}
               onLoadStart={() => console.log("ViroObject Load Start")}
               onLoadEnd={async () => {
@@ -353,6 +354,9 @@ export default function ARViewerScreen({ route, navigation }: ARViewerScreenProp
   const initialRotation: [number, number, number] = modelTransform?.rotation
     ? [modelTransform.rotation.x, modelTransform.rotation.y, modelTransform.rotation.z]
     : [0, 0, 0];
+  const initialModelOffset: [number, number, number] = modelTransform?.modelOffset
+    ? [modelTransform.modelOffset.x, modelTransform.modelOffset.y, modelTransform.modelOffset.z]
+    : [0, 0, 0];
   const [showMap, setShowMap] = useState(false);
   const [showMesh, setShowMesh] = useState(true);
   const [isTestCube, setIsTestCube] = useState(false); 
@@ -401,7 +405,7 @@ export default function ARViewerScreen({ route, navigation }: ARViewerScreenProp
   }, [modelUrl]);
 
   const viroAppProps = {
-    localModelPath, initialScale, initialRotation,
+    localModelPath, initialScale, initialRotation, initialModelOffset,
     showMesh, isTestCube,
     objectPosition, setObjectPosition,
     isPlaced, setIsPlaced

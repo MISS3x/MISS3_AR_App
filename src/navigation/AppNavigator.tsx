@@ -14,6 +14,7 @@ import ModelDetailScreen from '../screens/ModelDetailScreen';
 import ARViewerScreen from '../screens/ARViewerScreenWrapper';
 import ObjectPlanScreen from '../screens/ObjectPlanScreenWrapper';
 import ARRulerScreen from '../screens/ARRulerScreenWrapper';
+import ObjectCaptureScreen from '../screens/ObjectCaptureScreenWrapper';
 
 export type RootStackParamList = {
   CompanySelect: undefined;
@@ -22,6 +23,7 @@ export type RootStackParamList = {
   ARViewer: { modelUrl: string; modelTitle: string; iosSrc?: string };
   RoomSandbox: undefined;
   ARRuler: undefined;
+  ObjectCapture: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -61,6 +63,7 @@ export default function AppNavigator() {
         <Stack.Screen name="ARViewer" component={ARViewerScreen} />
         <Stack.Screen name="RoomSandbox" component={ObjectPlanScreen} />
         <Stack.Screen name="ARRuler" component={ARRulerScreen} />
+        <Stack.Screen name="ObjectCapture" component={ObjectCaptureScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

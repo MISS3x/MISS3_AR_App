@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android", "web"],
+  "apple": {
+    "modules": ["ObjectCaptureNativeModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.objectcapturenative.ObjectCaptureNativeModule"]
+  }
+}

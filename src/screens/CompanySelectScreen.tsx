@@ -196,8 +196,8 @@ export default function CompanySelectScreen({ navigation }: CompanySelectScreenP
             <View style={styles.toolCardLeft}>
               <Text style={styles.toolIcon}>📐</Text>
               <View>
-                <Text style={styles.toolTitle}>Floor Generator</Text>
-                <Text style={styles.toolSubtitle}>Scan rooms & place objects in AR</Text>
+                <Text style={styles.toolTitle}>Multi Models Viewer</Text>
+                <Text style={styles.toolSubtitle}>Place multiple 3D models in your room</Text>
               </View>
             </View>
             <View style={styles.proBadge}>
@@ -220,9 +220,33 @@ export default function CompanySelectScreen({ navigation }: CompanySelectScreenP
             <View style={styles.toolCardLeft}>
               <Text style={styles.toolIcon}>📏</Text>
               <View>
-                <Text style={styles.toolTitle}>AR Ruler</Text>
-                <Text style={styles.toolSubtitle}>Measure rooms mathematically in 3D</Text>
+                <Text style={styles.toolTitle}>AR Room Scanner</Text>
+                <Text style={styles.toolSubtitle}>Scan & measure rooms mathematically in 3D</Text>
               </View>
+            </View>
+          </LinearGradient>
+        </TouchableOpacity>
+
+        <TouchableOpacity 
+          onPress={() => navigation.navigate('ObjectCapture')}
+          activeOpacity={0.85}
+          style={[styles.toolCard, { marginTop: spacing.sm }]}
+        >
+          <LinearGradient
+            colors={['#1a3e3e', '#0d2a2a']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.toolCardGradient}
+          >
+            <View style={styles.toolCardLeft}>
+              <Text style={styles.toolIcon}>🗿</Text>
+              <View>
+                <Text style={styles.toolTitle}>AR Object Scanner</Text>
+                <Text style={styles.toolSubtitle}>High-fidelity 3D modeling via Photogrammetry</Text>
+              </View>
+            </View>
+            <View style={[styles.proBadge, { backgroundColor: '#FFD700' }]}>
+              <Text style={styles.proBadgeText}>NEW</Text>
             </View>
           </LinearGradient>
         </TouchableOpacity>

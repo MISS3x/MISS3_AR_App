@@ -6,6 +6,8 @@ import { ARRulerNativeViewProps } from './ARRulerNative.types';
 const NativeView: React.ComponentType<ARRulerNativeViewProps> =
   requireNativeViewManager('ARRulerNative');
 
-export default function ARRulerNativeView(props: ARRulerNativeViewProps) {
-  return <NativeView {...props} />;
-}
+const ARRulerNativeView = React.forwardRef<any, ARRulerNativeViewProps>((props, ref) => {
+  return <NativeView {...props} ref={ref as any} />;
+});
+
+export default ARRulerNativeView;

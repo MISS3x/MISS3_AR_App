@@ -67,6 +67,15 @@
 - [ ] **#25** — AR screenshot / recording
 - [x] **26. AR Tracking Tape (Linear Measure & Object Area)**
 - [x] **27. Real-Time Roomba LiDAR map sweeping**
+- [x] **28. Configurable Mesh Color via Props** (hot-reloadable z JS)
+
+## LiDAR Mesh & 3D Scanning (Roadmap)
+- [ ] **29. Full Mesh Export** — Serializace `ARMeshAnchor` vertices+faces → JSONB/PLY → uložení do Supabase
+- [ ] **30. Web 3D Rekonstrukce** — Three.js viewer na webu: načtení meshe z DB a zobrazení naskenované místnosti v prohlížeči
+- [ ] **31. Mesh Classification** — `ARMeshClassification` pro rozlišení podlaha/zeď/strop/stůl/dveře/okno + barevné kódování
+- [ ] **32. Vertex Color Texturing** — Pro každý vertex vzít barvu z kamery (`ARFrame.capturedImage` + `camera.projectPoint()`) → barevný 3D model
+- [ ] **33. Multi-Frame Texture Fusion** — Pokročilé blendování textur z více kamerových snímků pro seamless výsledek (Polycam-style)
+- [ ] **34. Object Scanning Mode** — Dedicated sken jednotlivých objektů (nábytek, sochy) s exportem OBJ/USDZ + textura
 
 ## Android Build
 - [ ] **#23** — EAS Android APK build

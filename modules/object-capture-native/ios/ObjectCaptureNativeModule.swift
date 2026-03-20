@@ -70,17 +70,21 @@ public class ObjectCaptureNativeModule: Module {
             self.photogrammetrySession = pSession
             
             self.processingTask = Task {
-                for try await output in pSession.outputs {
-                    switch output {
-                    case .processingComplete:
-                        promise.resolve(["objPath": outputUrl.path])
-                    case .requestProgress(_, let fractionComplete):
-                        self.sendEvent("onProcessingProgress", ["progress": fractionComplete])
-                    case .requestError(_, let error):
-                        promise.reject("PROCESSING_ERROR", error.localizedDescription)
-                    default:
-                        break
+                do {
+                    for try await output in pSession.outputs {
+                        switch output {
+                        case .processingComplete:
+                            promise.resolve(["objPath": outputUrl.path])
+                        case .requestProgress(_, let fractionComplete):
+                            self.sendEvent("onProcessingProgress", ["progress": fractionComplete])
+                        case .requestError(_, let error):
+                            promise.reject("PROCESSING_ERROR", error.localizedDescription)
+                        default:
+                            break
+                        }
                     }
+                } catch {
+                    promise.reject("STREAM_ERROR", "Output stream error: \(error.localizedDescription)")
                 }
             }
             

@@ -427,6 +427,11 @@ export default function ARRulerScreen({ navigation }: any) {
     setIsSyncing(true);
     addLog(`⏱ AUTO-SYNC START (chunk=${chunkSizeMB}MB)`);
     try {
+      // 0. Sync measurements (shapes)
+      addLog(`📐 Syncing measurements...`);
+      await syncMeasurements();
+      addLog(`✅ Measurements synced`);
+
       // 1. Export mesh chunks
       addLog(`📦 Exporting mesh chunks (max ${chunkSizeMB}MB each)...`);
       const chunks = await rulerRef.current?.exportMeshChunks(chunkSizeMB);
@@ -655,9 +660,6 @@ export default function ARRulerScreen({ navigation }: any) {
           {userId ? `🟢 ${userEmail || 'Logged In'}` : '🔴 Anonymous'}
         </Text>
         <Text style={styles.debugText}>Shapes: {shapeCount} | Pending: {pendingCount} | Synced: {uploadedCount}</Text>
-        <TouchableOpacity style={styles.syncBtn} onPress={syncMeasurements} disabled={isSyncing || pendingCount === 0}>
-          <Text style={styles.syncBtnText}>{isSyncing ? "Syncing..." : "Sync"}</Text>
-        </TouchableOpacity>
       </View>
       
 

@@ -10,7 +10,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 
 // Drawing mode colors
 const tronBlue = '#33CCFF';
-const levelsGreen = '#00E666';
+const freeOrange = '#FF9800';
 const wallPink = '#FF4D99';
 
 export default function ARRulerScreen({ navigation }: any) {
@@ -21,7 +21,7 @@ export default function ARRulerScreen({ navigation }: any) {
   const [roomHeight, setRoomHeight] = useState<number | null>(null);
   const [floorDetected, setFloorDetected] = useState(false);
   const [prompt, setPrompt] = useState("Move phone to scan floor...");
-  const [drawingMode, setDrawingMode] = useState<'floor' | 'levels' | 'wall'>('floor');
+  const [drawingMode, setDrawingMode] = useState<'floor' | 'free' | 'wall'>('floor');
   const [shapeCount, setShapeCount] = useState(0);
   const [showWire, setShowWire] = useState(true);
   
@@ -280,7 +280,7 @@ export default function ARRulerScreen({ navigation }: any) {
       setRoomHeight(null);
       setFloorDetected(false);
       setShapeCount(0);
-      setPrompt(drawingMode === 'floor' ? "Move phone to scan floor..." : drawingMode === 'levels' ? "Levels mode — free height" : "Scan wall to begin");
+      setPrompt(drawingMode === 'floor' ? "Move phone to scan floor..." : drawingMode === 'free' ? "Free mode — any surface" : "Scan wall to begin");
     }
   };
 
@@ -717,7 +717,7 @@ export default function ARRulerScreen({ navigation }: any) {
   };
 
   const tronBlue = '#33CCFF';
-  const levelsGreen = '#00E666';
+  const freeOrange = '#FF9800';
 
   // Auto-edge handlers
   const handleDetectEdges = async () => {
@@ -941,11 +941,11 @@ export default function ARRulerScreen({ navigation }: any) {
          </TouchableOpacity>
 
          <TouchableOpacity 
-           style={[styles.modeButton, drawingMode === 'levels' && { ...styles.modeButtonActive, borderColor: levelsGreen, backgroundColor: 'rgba(0,230,102,0.15)' }]} 
-           onPress={() => { setDrawingMode('levels'); setPrompt('Free mode — any surface'); }}
+           style={[styles.modeButton, drawingMode === 'free' && { ...styles.modeButtonActive, borderColor: freeOrange, backgroundColor: 'rgba(255,152,0,0.15)' }]} 
+           onPress={() => { setDrawingMode('free'); setPrompt('Free mode — any surface'); }}
            activeOpacity={0.7}
          >
-            <Text style={[styles.modeButtonText, drawingMode === 'levels' && { color: levelsGreen }]}>FREE</Text>
+            <Text style={[styles.modeButtonText, drawingMode === 'free' && { color: freeOrange }]}>FREE</Text>
          </TouchableOpacity>
 
          <TouchableOpacity 
@@ -960,8 +960,8 @@ export default function ARRulerScreen({ navigation }: any) {
 
       {/* + Add point — center bottom */}
       <View style={{ position: 'absolute', bottom: insets.bottom + 100, left: 0, right: 0, alignItems: 'center', zIndex: 15 }} pointerEvents="box-none">
-         <TouchableOpacity style={[styles.addPointButton, { borderColor: drawingMode === 'levels' ? levelsGreen : drawingMode === 'wall' ? wallPink : tronBlue }]} onPress={handleAddPoint} activeOpacity={0.7}>
-            <Text style={[styles.addPointText, { color: drawingMode === 'levels' ? levelsGreen : drawingMode === 'wall' ? wallPink : tronBlue }]}>+</Text>
+         <TouchableOpacity style={[styles.addPointButton, { borderColor: drawingMode === 'free' ? freeOrange : drawingMode === 'wall' ? wallPink : tronBlue }]} onPress={handleAddPoint} activeOpacity={0.7}>
+            <Text style={[styles.addPointText, { color: drawingMode === 'free' ? freeOrange : drawingMode === 'wall' ? wallPink : tronBlue }]}>+</Text>
          </TouchableOpacity>
       </View>
       

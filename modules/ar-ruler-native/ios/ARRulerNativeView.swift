@@ -16,7 +16,7 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   // State
   enum DrawingMode: String {
     case floor = "floor"
-    case levels = "levels"
+    case free = "free"
     case wall = "wall"
   }
   public var drawingMode: DrawingMode = .floor
@@ -27,7 +27,7 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   // Tron Blue for floor mode
   private let tronBlue = UIColor(red: 0.2, green: 0.8, blue: 1.0, alpha: 1.0)
   private let measureYellow = UIColor(red: 1.0, green: 0.85, blue: 0.0, alpha: 1.0)
-  private let levelsGreen = UIColor(red: 0.0, green: 0.9, blue: 0.4, alpha: 1.0)
+  private let freeOrange = UIColor(red: 1.0, green: 0.6, blue: 0.0, alpha: 1.0)
   private let wallPink = UIColor(red: 1.0, green: 0.3, blue: 0.6, alpha: 1.0)
   
   // Configurable cursor params (adjustable from JS without rebuild)
@@ -312,7 +312,7 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
       }
       pointerColor = wallPink
 
-    case .levels:
+    case .free: // Renamed from .levels
       // FREE: any polygon, any surface
       if let result = arView.hitTest(screenCenter, types: [.existingPlaneUsingExtent, .estimatedHorizontalPlane, .estimatedVerticalPlane, .featurePoint]).first {
         hitPosition = SCNVector3(result.worldTransform.columns.3.x,
@@ -322,7 +322,7 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
                                    result.worldTransform.columns.1.y,
                                    result.worldTransform.columns.1.z)
       }
-      pointerColor = levelsGreen
+      pointerColor = freeOrange // Renamed from levelsGreen
 
     case .floor:
       // FLOOR: locked to floorY, horizontal only
@@ -407,7 +407,7 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   private func modeColor() -> UIColor {
     switch drawingMode {
     case .floor: return tronBlue
-    case .levels: return levelsGreen
+    case .free: return freeOrange
     case .wall: return wallPink
     }
   }
@@ -501,8 +501,8 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
             onUpdate(["event": "floor_manual_set", "y": hitPos.y])
             return
         }
-    case .levels:
-        color = levelsGreen
+    case .free:
+        color = freeOrange
     case .wall:
         color = wallPink
     }
@@ -702,7 +702,7 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
     let shapeNumber = closedShapes.count + 1
     let shapeData: [String: Any] = [
         "shapeNumber": shapeNumber,
-        "type": isWallMode ? "wall" : "floor",
+        "type": drawingMode.rawValue,
         "area": area,
         "points": currentPolygon.map { ["x": $0.x, "y": $0.y, "z": $0.z] },
         "height": abs((ceilingY ?? 0) - (floorY ?? 0))
@@ -1197,7 +1197,7 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
       let color: UIColor
       switch shapeType {
       case "wall": color = wallPink
-      case "levels", "line": color = levelsGreen
+      case "free", "line", "polyline": color = freeOrange
       default: color = tronBlue
       }
       

@@ -126,6 +126,10 @@ public class ARRulerNativeModule: Module {
       AsyncFunction("loadBoundingBoxes") { (view: ARRulerNativeView, boxes: [[String: Any]]) -> Int in
         return view.loadBoundingBoxes(boxes: boxes)
       }
+
+      AsyncFunction("exportRoomPlanData") { (view: ARRulerNativeView) -> [String: Any] in
+        return view.exportRoomPlanData()
+      }
     }
   }
 }

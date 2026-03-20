@@ -598,7 +598,7 @@ export default function ARRulerScreen({ navigation }: any) {
     }
   };
 
-  // 15s auto-sync timer for measurements + bounding boxes + anchors
+  // 15s auto-sync timer for measurements + bounding boxes + RoomPlan + anchors
   useEffect(() => {
     if (!projectData || !userId) return;
     const interval = setInterval(async () => {
@@ -613,12 +613,39 @@ export default function ARRulerScreen({ navigation }: any) {
         } catch (e: any) { addLogM(`❌ ${e.message}`); }
       }
       
-      // Bounding boxes (always if autoSyncBoundingBoxes)
+      // Bounding boxes + RoomPlan (always if autoSyncBoundingBoxes)
       if (autoSyncBoundingBoxes) {
         try {
-          addLogB(`🔄 Auto-syncing CAD...`);
+          addLogB(`🔄 Auto-syncing CAD + RoomPlan...`);
           await syncCADData();
-          addLogB(`✅ CAD synced`);
+          
+          // RoomPlan structured data
+          try {
+            const roomData = await rulerRef.current?.exportRoomPlanData();
+            if (roomData && (roomData.wallCount > 0 || roomData.doorCount > 0 || roomData.windowCount > 0)) {
+              await supabase.from('ar_roomplan').upsert({
+                id: `${projectData.id}_roomplan`,
+                project_id: projectData.id,
+                user_id: userId,
+                walls: roomData.walls,
+                doors: roomData.doors,
+                windows: roomData.windows,
+                openings: roomData.openings,
+                floors: roomData.floors,
+                objects: roomData.objects,
+                wall_count: roomData.wallCount,
+                door_count: roomData.doorCount,
+                window_count: roomData.windowCount,
+                object_count: roomData.objectCount,
+                updated_at: new Date().toISOString(),
+              }, { onConflict: 'id' });
+              addLogB(`✅ RoomPlan: ${roomData.wallCount}W ${roomData.doorCount}D ${roomData.windowCount}Wi ${roomData.objectCount}O`);
+            } else {
+              addLogB(`✅ CAD synced (no RoomPlan yet)`);
+            }
+          } catch (rpErr: any) {
+            addLogB(`✅ CAD ok, RoomPlan: ${rpErr.message}`);
+          }
         } catch (e: any) { addLogB(`❌ ${e.message}`); }
       }
       

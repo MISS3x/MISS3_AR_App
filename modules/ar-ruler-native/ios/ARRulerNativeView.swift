@@ -95,7 +95,9 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
     arView.scene.rootNode.addChildNode(ambNode)
     
     if #available(iOS 16.0, *) {
-        self.roomPlanController = RoomPlanController()
+        let rpc = RoomPlanController()
+        rpc.sceneView = arView
+        self.roomPlanController = rpc
     }
     
     setupPointer()
@@ -1186,6 +1188,16 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
     }
   }
 
+  // MARK: - Export RoomPlan structured data
+  func exportRoomPlanData() -> [String: Any] {
+    if #available(iOS 16.0, *) {
+        if let rpc = roomPlanController as? RoomPlanController {
+            return rpc.exportRoomPlanData()
+        }
+    }
+    return [:]
+  }
+
   // MARK: - Load Shapes from Supabase
   func loadShapes(shapes: [[String: Any]]) -> Int {
     var count = 0
@@ -1895,6 +1907,19 @@ extension UIColor {
 class RoomPlanController: NSObject, RoomCaptureSessionDelegate {
     var session: RoomCaptureSession?
     var latestRoom: CapturedRoom?
+    weak var sceneView: ARSCNView?
+    
+    // Nodes for real-time rendering
+    private var roomNodes: [SCNNode] = []
+    private let roomRootNode = SCNNode()
+    
+    // Colors for each element type
+    private let wallColor = UIColor(red: 0.3, green: 0.5, blue: 0.9, alpha: 0.25)
+    private let doorColor = UIColor(red: 1.0, green: 0.6, blue: 0.0, alpha: 0.35)
+    private let windowColor = UIColor(red: 0.0, green: 0.9, blue: 1.0, alpha: 0.35)
+    private let floorColor = UIColor(red: 0.0, green: 0.8, blue: 0.3, alpha: 0.15)
+    private let openingColor = UIColor(red: 0.8, green: 0.8, blue: 0.0, alpha: 0.25)
+    private let objectColor = UIColor(red: 0.9, green: 0.3, blue: 0.9, alpha: 0.2)
     
     func start(arSession: ARSession) {
         if #available(iOS 17.0, *) {
@@ -1902,14 +1927,261 @@ class RoomPlanController: NSObject, RoomCaptureSessionDelegate {
             session = RoomCaptureSession(arSession: arSession)
             session?.delegate = self
             session?.run(configuration: config)
+            // Add root node to scene
+            sceneView?.scene.rootNode.addChildNode(roomRootNode)
+            print("[RoomPlan] Session started")
         }
     }
     
     func stop() {
         session?.stop()
+        roomRootNode.removeFromParentNode()
+        print("[RoomPlan] Session stopped")
     }
     
     func captureSession(_ session: RoomCaptureSession, didUpdate room: CapturedRoom) {
         self.latestRoom = room
+        DispatchQueue.main.async { [weak self] in
+            self?.updateARVisualization(room: room)
+        }
+    }
+    
+    func captureSession(_ session: RoomCaptureSession, didEndWith data: CapturedRoomData, error: Error?) {
+        if let error = error {
+            print("[RoomPlan] Session ended with error: \(error.localizedDescription)")
+        } else {
+            print("[RoomPlan] Session ended successfully")
+        }
+    }
+    
+    // MARK: - Real-time AR Visualization
+    
+    private func updateARVisualization(room: CapturedRoom) {
+        // Clear old nodes
+        for node in roomNodes {
+            node.removeFromParentNode()
+        }
+        roomNodes.removeAll()
+        
+        // Render walls
+        for wall in room.walls {
+            let node = createBoxNode(
+                dimensions: wall.dimensions,
+                transform: wall.transform,
+                color: wallColor,
+                label: "Wall"
+            )
+            roomRootNode.addChildNode(node)
+            roomNodes.append(node)
+        }
+        
+        // Render doors
+        for door in room.doors {
+            let node = createBoxNode(
+                dimensions: door.dimensions,
+                transform: door.transform,
+                color: doorColor,
+                label: "Door"
+            )
+            roomRootNode.addChildNode(node)
+            roomNodes.append(node)
+        }
+        
+        // Render windows
+        for window in room.windows {
+            let node = createBoxNode(
+                dimensions: window.dimensions,
+                transform: window.transform,
+                color: windowColor,
+                label: "Window"
+            )
+            roomRootNode.addChildNode(node)
+            roomNodes.append(node)
+        }
+        
+        // Render openings
+        for opening in room.openings {
+            let node = createBoxNode(
+                dimensions: opening.dimensions,
+                transform: opening.transform,
+                color: openingColor,
+                label: "Opening"
+            )
+            roomRootNode.addChildNode(node)
+            roomNodes.append(node)
+        }
+        
+        // Render floors
+        for floor in room.floors {
+            let node = createBoxNode(
+                dimensions: floor.dimensions,
+                transform: floor.transform,
+                color: floorColor,
+                label: "Floor"
+            )
+            roomRootNode.addChildNode(node)
+            roomNodes.append(node)
+        }
+        
+        // Render objects (furniture)
+        for obj in room.objects {
+            let label: String
+            switch obj.category {
+            case .table: label = "Table"
+            case .chair: label = "Chair"
+            case .sofa: label = "Sofa"
+            case .bed: label = "Bed"
+            case .storage: label = "Storage"
+            case .refrigerator: label = "Fridge"
+            case .stove: label = "Stove"
+            case .oven: label = "Oven"
+            case .sink: label = "Sink"
+            case .washerDryer: label = "Washer"
+            case .toilet: label = "Toilet"
+            case .bathtub: label = "Bathtub"
+            case .television: label = "TV"
+            default: label = "Object"
+            }
+            let node = createBoxNode(
+                dimensions: obj.dimensions,
+                transform: obj.transform,
+                color: objectColor,
+                label: label
+            )
+            roomRootNode.addChildNode(node)
+            roomNodes.append(node)
+        }
+    }
+    
+    private func createBoxNode(dimensions: simd_float3, transform: simd_float4x4, color: UIColor, label: String) -> SCNNode {
+        let container = SCNNode()
+        
+        // Translucent filled box
+        let box = SCNBox(width: CGFloat(dimensions.x), height: CGFloat(dimensions.y), length: CGFloat(dimensions.z), chamferRadius: 0)
+        let material = SCNMaterial()
+        material.diffuse.contents = color
+        material.lightingModel = .constant
+        material.isDoubleSided = true
+        material.transparency = 1.0
+        material.writesToDepthBuffer = false
+        box.materials = [material]
+        let boxNode = SCNNode(geometry: box)
+        container.addChildNode(boxNode)
+        
+        // Wireframe edges
+        let wireBox = SCNBox(width: CGFloat(dimensions.x) + 0.002, height: CGFloat(dimensions.y) + 0.002, length: CGFloat(dimensions.z) + 0.002, chamferRadius: 0)
+        let wireMaterial = SCNMaterial()
+        wireMaterial.diffuse.contents = color.withAlphaComponent(0.8)
+        wireMaterial.lightingModel = .constant
+        wireMaterial.fillMode = .lines
+        wireMaterial.isDoubleSided = true
+        wireBox.materials = [wireMaterial]
+        let wireNode = SCNNode(geometry: wireBox)
+        container.addChildNode(wireNode)
+        
+        // Label above
+        let text = SCNText(string: label, extrusionDepth: 0.5)
+        text.font = UIFont.systemFont(ofSize: 4, weight: .bold)
+        text.flatness = 0.1
+        let textMat = SCNMaterial()
+        textMat.diffuse.contents = UIColor.white
+        textMat.lightingModel = .constant
+        text.materials = [textMat]
+        let textNode = SCNNode(geometry: text)
+        textNode.scale = SCNVector3(0.005, 0.005, 0.005)
+        let (minBound, maxBound) = textNode.boundingBox
+        textNode.position = SCNVector3(
+            -(maxBound.x - minBound.x) * 0.005 / 2,
+            dimensions.y / 2 + 0.05,
+            0
+        )
+        textNode.constraints = [SCNBillboardConstraint()]
+        container.addChildNode(textNode)
+        
+        // Apply transform
+        container.simdTransform = transform
+        
+        return container
+    }
+    
+    // MARK: - Export structured RoomPlan data
+    
+    func exportRoomPlanData() -> [String: Any] {
+        guard let room = latestRoom else { return [:] }
+        
+        var walls: [[String: Any]] = []
+        for wall in room.walls {
+            walls.append(surfaceToDict(id: wall.identifier, dimensions: wall.dimensions, transform: wall.transform, category: "wall"))
+        }
+        
+        var doors: [[String: Any]] = []
+        for door in room.doors {
+            doors.append(surfaceToDict(id: door.identifier, dimensions: door.dimensions, transform: door.transform, category: "door"))
+        }
+        
+        var windows: [[String: Any]] = []
+        for window in room.windows {
+            windows.append(surfaceToDict(id: window.identifier, dimensions: window.dimensions, transform: window.transform, category: "window"))
+        }
+        
+        var openings: [[String: Any]] = []
+        for opening in room.openings {
+            openings.append(surfaceToDict(id: opening.identifier, dimensions: opening.dimensions, transform: opening.transform, category: "opening"))
+        }
+        
+        var floors: [[String: Any]] = []
+        for floor in room.floors {
+            floors.append(surfaceToDict(id: floor.identifier, dimensions: floor.dimensions, transform: floor.transform, category: "floor"))
+        }
+        
+        var objects: [[String: Any]] = []
+        for obj in room.objects {
+            var className = "unknown"
+            switch obj.category {
+            case .chair: className = "chair"
+            case .table: className = "table"
+            case .sofa: className = "sofa"
+            case .bed: className = "bed"
+            case .storage: className = "storage"
+            case .refrigerator: className = "refrigerator"
+            case .stove: className = "stove"
+            case .oven: className = "oven"
+            case .sink: className = "sink"
+            case .washerDryer: className = "washerDryer"
+            case .toilet: className = "toilet"
+            case .bathtub: className = "bathtub"
+            case .television: className = "television"
+            default: className = "unknown"
+            }
+            objects.append(surfaceToDict(id: obj.identifier, dimensions: obj.dimensions, transform: obj.transform, category: className))
+        }
+        
+        return [
+            "walls": walls,
+            "doors": doors,
+            "windows": windows,
+            "openings": openings,
+            "floors": floors,
+            "objects": objects,
+            "wallCount": walls.count,
+            "doorCount": doors.count,
+            "windowCount": windows.count,
+            "objectCount": objects.count
+        ]
+    }
+    
+    private func surfaceToDict(id: UUID, dimensions: simd_float3, transform: simd_float4x4, category: String) -> [String: Any] {
+        return [
+            "identifier": id.uuidString,
+            "category": category,
+            "dimensions": ["width": dimensions.x, "height": dimensions.y, "depth": dimensions.z],
+            "position": ["x": transform.columns.3.x, "y": transform.columns.3.y, "z": transform.columns.3.z],
+            "transform": [
+                transform.columns.0.x, transform.columns.0.y, transform.columns.0.z, transform.columns.0.w,
+                transform.columns.1.x, transform.columns.1.y, transform.columns.1.z, transform.columns.1.w,
+                transform.columns.2.x, transform.columns.2.y, transform.columns.2.z, transform.columns.2.w,
+                transform.columns.3.x, transform.columns.3.y, transform.columns.3.z, transform.columns.3.w
+            ]
+        ]
     }
 }

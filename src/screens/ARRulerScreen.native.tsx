@@ -317,16 +317,60 @@ export default function ARRulerScreen({ navigation }: any) {
     }
   };
 
-  // --- Reset + Clean Supabase ---
-  const handleReset = async () => {
-    rulerRef.current?.reset();
-    if (projectData?.id && userId) {
-      try {
+  // --- Reset with confirmation + selective delete ---
+  const handleReset = () => {
+    Alert.alert(
+      '🗑 Reset Project Data',
+      'What do you want to delete? Anchors are always kept.',
+      [
+        { text: '📐 Measurements Only', onPress: () => deleteCategory('measurements') },
+        { text: '📦 Meshes Only', onPress: () => deleteCategory('meshes') },
+        { text: '🏠 Bounding Boxes Only', onPress: () => deleteCategory('boxes') },
+        { text: '🔥 DELETE ALL', style: 'destructive', onPress: () => deleteCategory('all') },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
+  };
+
+  const deleteCategory = async (category: 'measurements' | 'meshes' | 'boxes' | 'all') => {
+    if (!projectData?.id || !userId) return;
+    addLog(`🗑 Deleting: ${category}...`);
+    try {
+      if (category === 'measurements' || category === 'all') {
         await supabase.from('ar_measurements').delete().eq('project_id', projectData.id);
         await AsyncStorage.setItem('@ar_measurements', JSON.stringify([]));
         setPendingCount(0);
         setUploadedCount(0);
-      } catch (e) { console.log("Reset cleanup error:", e); }
+        setShapeCount(0);
+        rulerRef.current?.reset(); // Clear visual shapes from AR
+        addLogM(`🗑 All measurements deleted`);
+        addLog(`✅ Measurements deleted`);
+      }
+      if (category === 'meshes' || category === 'all') {
+        // Delete mesh chunks from storage
+        const { data: meshFiles } = await supabase.from('ar_mesh_scans').select('file_path').eq('project_id', projectData.id);
+        if (meshFiles) {
+          for (const mf of meshFiles) {
+            await supabase.storage.from('mesh-scans').remove([mf.file_path]);
+          }
+        }
+        await supabase.from('ar_mesh_scans').delete().eq('project_id', projectData.id);
+        // Reset mesh metadata on project
+        await supabase.from('ar_projects').update({ mesh_url: null, mesh_vertices_count: 0, mesh_faces_count: 0, mesh_file_size: 0 }).eq('id', projectData.id);
+        addLogMesh(`🗑 All mesh chunks deleted`);
+        addLog(`✅ Meshes deleted`);
+      }
+      if (category === 'boxes' || category === 'all') {
+        await supabase.from('ar_bounding_boxes').delete().eq('project_id', projectData.id);
+        addLogB(`🗑 All bounding boxes deleted`);
+        addLog(`✅ Bounding boxes deleted`);
+      }
+      if (category === 'all') {
+        rulerRef.current?.reset();
+      }
+      setPrompt(`${category === 'all' ? 'All data' : category.charAt(0).toUpperCase() + category.slice(1)} deleted. Anchors preserved.`);
+    } catch (e: any) {
+      addLog(`❌ Delete error: ${e.message}`);
     }
   };
 

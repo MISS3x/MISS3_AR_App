@@ -134,6 +134,14 @@ public class ARRulerNativeModule: Module {
       AsyncFunction("finalizeRoomPlan") { (view: ARRulerNativeView) in
         view.finalizeRoomPlan()
       }
+
+      AsyncFunction("startRoomScan") { (view: ARRulerNativeView) in
+        view.startRoomScan()
+      }
+
+      AsyncFunction("stopRoomScan") { (view: ARRulerNativeView) in
+        view.stopRoomScan()
+      }
     }
   }
 }

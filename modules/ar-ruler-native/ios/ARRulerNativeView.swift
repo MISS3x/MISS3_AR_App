@@ -117,14 +117,10 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
         config.sceneReconstruction = .mesh
       }
       arView.session.run(config, options: [.resetTracking, .removeExistingAnchors])
-      
-      if #available(iOS 16.0, *) {
-          if let rpc = roomPlanController as? RoomPlanController {
-              rpc.start(arSession: arView.session)
-          }
-      }
+      // RoomPlan NOT auto-started here — user controls via START SCAN button
     } else {
       arView.session.pause()
+      // Stop RoomPlan if running
       if #available(iOS 16.0, *) {
           if let rpc = roomPlanController as? RoomPlanController {
               rpc.stop()
@@ -1203,6 +1199,26 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
     if #available(iOS 16.0, *) {
         if let rpc = roomPlanController as? RoomPlanController {
             rpc.finalizeRoom()
+        }
+    }
+  }
+
+  // MARK: - Start Room Scan (user-controlled)
+  func startRoomScan() {
+    if #available(iOS 16.0, *) {
+        if let rpc = roomPlanController as? RoomPlanController {
+            rpc.start(arSession: arView.session)
+            print("[RoomPlan] User started room scan")
+        }
+    }
+  }
+
+  // MARK: - Stop Room Scan (triggers finalization)
+  func stopRoomScan() {
+    if #available(iOS 16.0, *) {
+        if let rpc = roomPlanController as? RoomPlanController {
+            rpc.stop()
+            print("[RoomPlan] User stopped room scan — finalization will auto-trigger")
         }
     }
   }

@@ -64,12 +64,11 @@ export default function ARRulerScreen({ navigation }: any) {
   const [isSyncing, setIsSyncing] = useState(false);
 
   // Debug & Sync Controls
-  const [chunkSizeMB, setChunkSizeMB] = useState(10);
+  const [chunkSizeMB, setChunkSizeMB] = useState(45); // 45MB Supabase limit
   const [showDebugPanel, setShowDebugPanel] = useState(true);
-  // Per-category auto-sync toggles
-  const [autoSyncMeasurements, setAutoSyncMeasurements] = useState(true);
-  const [autoSyncBoundingBoxes, setAutoSyncBoundingBoxes] = useState(true);
-  const [autoSyncMeshes, setAutoSyncMeshes] = useState(false); // mesh only on chunk size
+  // Room scan state
+  const [isRoomScanning, setIsRoomScanning] = useState(false);
+  const [isRoomFinalizing, setIsRoomFinalizing] = useState(false);
   // Per-category logs
   const [logsM, setLogsM] = useState<string[]>([]); // measurements
   const [logsB, setLogsB] = useState<string[]>([]); // bounding boxes
@@ -598,28 +597,94 @@ export default function ARRulerScreen({ navigation }: any) {
     }
   };
 
+  // --- Room Scan Start/Stop Handlers ---
+  const handleStartRoomScan = async () => {
+    if (!userId || !projectData) {
+      Alert.alert('Login Required', 'Sign in and create a project first.');
+      return;
+    }
+    try {
+      await rulerRef.current?.startRoomScan();
+      setIsRoomScanning(true);
+      setPrompt('🏠 Room scan active — move slowly around the room...');
+      addLogB('🏠 Room scan started');
+    } catch (e: any) {
+      addLogB(`❌ Start scan error: ${e.message}`);
+    }
+  };
+
+  const handleStopRoomScan = async () => {
+    try {
+      setIsRoomScanning(false);
+      setIsRoomFinalizing(true);
+      setPrompt('⏳ Stopping scan & finalizing room plan...');
+      addLogB('🛑 Stopping room scan...');
+      
+      // 1. Stop RoomCaptureSession (triggers RoomBuilder finalization on Swift side)
+      await rulerRef.current?.stopRoomScan();
+      
+      // 2. Wait for RoomBuilder ML finalization
+      addLogB('🧠 RoomBuilder ML finalization in progress...');
+      await new Promise(r => setTimeout(r, 4000));
+      
+      // 3. Auto-export mesh chunks (45MB max)
+      addLogMesh('📤 Auto-exporting mesh...');
+      await handleExportMesh();
+      
+      // 4. Sync final RoomPlan data immediately
+      const roomData = await rulerRef.current?.exportRoomPlanData();
+      if (roomData && (roomData.wallCount > 0 || roomData.doorCount > 0 || roomData.windowCount > 0)) {
+        await supabase.from('ar_roomplan').upsert({
+          id: `${projectData!.id}_roomplan`,
+          project_id: projectData!.id,
+          user_id: userId,
+          walls: roomData.walls,
+          doors: roomData.doors,
+          windows: roomData.windows,
+          openings: roomData.openings,
+          floors: roomData.floors,
+          objects: roomData.objects,
+          wall_count: roomData.wallCount,
+          door_count: roomData.doorCount,
+          window_count: roomData.windowCount,
+          object_count: roomData.objectCount,
+          is_finalized: roomData.isFinalized ?? false,
+          inferred_ceiling_y: roomData.inferredCeilingY ?? null,
+          inferred_floor_y: roomData.inferredFloorY ?? null,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'id' });
+        addLogB(`✅ RoomPlan ${roomData.isFinalized ? '[FINAL]' : '[preview]'}: ${roomData.wallCount}W ${roomData.doorCount}D ${roomData.windowCount}Wi`);
+      }
+      
+      setIsRoomFinalizing(false);
+      setPrompt('✅ Room scan complete! Data uploaded.');
+    } catch (e: any) {
+      setIsRoomFinalizing(false);
+      addLogB(`❌ Stop scan error: ${e.message}`);
+      setPrompt(`❌ Scan error: ${e.message}`);
+    }
+  };
+
   // 15s auto-sync timer for measurements + bounding boxes + RoomPlan + anchors
   useEffect(() => {
     if (!projectData || !userId) return;
     const interval = setInterval(async () => {
       if (isSyncing) return;
       
-      // Measurements (always if autoSyncMeasurements)
-      if (autoSyncMeasurements) {
-        try {
-          addLogM(`🔄 Auto-syncing...`);
-          await syncMeasurements();
-          addLogM(`✅ Synced`);
-        } catch (e: any) { addLogM(`❌ ${e.message}`); }
-      }
+      // Measurements (always on)
+      try {
+        addLogM(`🔄 Auto-syncing...`);
+        await syncMeasurements();
+        addLogM(`✅ Synced`);
+      } catch (e: any) { addLogM(`❌ ${e.message}`); }
       
-      // Bounding boxes + RoomPlan (always if autoSyncBoundingBoxes)
-      if (autoSyncBoundingBoxes) {
-        try {
-          addLogB(`🔄 Auto-syncing CAD + RoomPlan...`);
-          await syncCADData();
-          
-          // RoomPlan structured data
+      // Bounding boxes + RoomPlan (always on)
+      try {
+        addLogB(`🔄 Auto-syncing CAD + RoomPlan...`);
+        await syncCADData();
+        
+        // RoomPlan structured data (only if scanning or finalized)
+        if (isRoomScanning || isRoomFinalizing) {
           try {
             const roomData = await rulerRef.current?.exportRoomPlanData();
             if (roomData && (roomData.wallCount > 0 || roomData.doorCount > 0 || roomData.windowCount > 0)) {
@@ -643,14 +708,14 @@ export default function ARRulerScreen({ navigation }: any) {
                 updated_at: new Date().toISOString(),
               }, { onConflict: 'id' });
               addLogB(`✅ RoomPlan${roomData.isFinalized ? ' [FINAL]' : ''}: ${roomData.wallCount}W ${roomData.doorCount}D ${roomData.windowCount}Wi ${roomData.objectCount}O`);
-            } else {
-              addLogB(`✅ CAD synced (no RoomPlan yet)`);
             }
           } catch (rpErr: any) {
             addLogB(`✅ CAD ok, RoomPlan: ${rpErr.message}`);
           }
-        } catch (e: any) { addLogB(`❌ ${e.message}`); }
-      }
+        } else {
+          addLogB(`✅ CAD synced`);
+        }
+      } catch (e: any) { addLogB(`❌ ${e.message}`); }
       
       // Anchors (always on — can't disable)
       try {
@@ -667,7 +732,7 @@ export default function ARRulerScreen({ navigation }: any) {
       
     }, 15000);
     return () => clearInterval(interval);
-  }, [projectData, userId, autoSyncMeasurements, autoSyncBoundingBoxes, isSyncing]);
+  }, [projectData, userId, isSyncing, isRoomScanning, isRoomFinalizing]);
 
   const handleExportMesh = async () => {
     if (!userId || !projectData) {
@@ -855,11 +920,25 @@ export default function ARRulerScreen({ navigation }: any) {
          </TouchableOpacity>
 
          <TouchableOpacity 
-           style={[styles.modeButton, { borderColor: '#4CAF50' }]}
-           onPress={handleExportMesh}
+           style={[styles.modeButton, 
+             isRoomScanning ? { ...styles.modeButtonActive, borderColor: '#FF1744', backgroundColor: 'rgba(255,23,68,0.2)' } :
+             isRoomFinalizing ? { ...styles.modeButtonActive, borderColor: '#FFD600', backgroundColor: 'rgba(255,214,0,0.15)' } :
+             { borderColor: '#4CAF50' }
+           ]}
+           onPress={isRoomScanning ? handleStopRoomScan : handleStartRoomScan}
+           disabled={isRoomFinalizing}
            activeOpacity={0.7}
          >
-            <Text style={[styles.modeButtonText, { color: '#4CAF50' }]}>EXPORT{"\n"}MESH</Text>
+            {isRoomFinalizing ? (
+              <>
+                <ActivityIndicator size="small" color="#FFD600" />
+                <Text style={[styles.modeButtonText, { color: '#FFD600', fontSize: 8 }]}>FINAL{"\n"}IZING</Text>
+              </>
+            ) : isRoomScanning ? (
+              <Text style={[styles.modeButtonText, { color: '#FF1744' }]}>🛑{"\n"}STOP{"\n"}SCAN</Text>
+            ) : (
+              <Text style={[styles.modeButtonText, { color: '#4CAF50' }]}>🏠{"\n"}START{"\n"}SCAN</Text>
+            )}
          </TouchableOpacity>
 
          <TouchableOpacity 
@@ -1047,65 +1126,41 @@ export default function ARRulerScreen({ navigation }: any) {
       {showDebugPanel && (
         <ScrollView style={{ position: 'absolute', right: 12, top: insets.top + 80, width: 270, maxHeight: 420, backgroundColor: 'rgba(0,0,0,0.9)', borderRadius: 10, padding: 8, zIndex: 99, borderWidth: 1, borderColor: 'rgba(0,255,100,0.3)' }}>
           
-          {/* 1. MEASUREMENTS */}
-          <TouchableOpacity
-            onPress={() => setAutoSyncMeasurements(!autoSyncMeasurements)}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}
-          >
-            <View style={{ width: 14, height: 14, borderRadius: 7, borderWidth: 2, borderColor: autoSyncMeasurements ? '#33CCFF' : '#666', alignItems: 'center', justifyContent: 'center' }}>
-              {autoSyncMeasurements && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#33CCFF' }} />}
+          {/* 1. MEASUREMENTS (always on) */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <View style={{ width: 14, height: 14, borderRadius: 7, borderWidth: 2, borderColor: '#33CCFF', alignItems: 'center', justifyContent: 'center' }}>
+              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#33CCFF' }} />
             </View>
-            <Text style={{ color: autoSyncMeasurements ? '#33CCFF' : '#888', fontSize: 10, fontWeight: 'bold', fontFamily: 'monospace', flex: 1 }}>📐 MEASUREMENTS (15s)</Text>
+            <Text style={{ color: '#33CCFF', fontSize: 10, fontWeight: 'bold', fontFamily: 'monospace', flex: 1 }}>📐 MEASUREMENTS (15s)</Text>
             <Text style={{ color: '#555', fontSize: 8, fontFamily: 'monospace' }}>floor/wall/free</Text>
-          </TouchableOpacity>
+          </View>
           {logsM.length > 0 && logsM.slice(0, 3).map((l, i) => (
             <Text key={`m${i}`} style={{ color: l.includes('❌') ? '#f66' : '#8cf', fontSize: 8, fontFamily: 'monospace', paddingLeft: 20, marginBottom: 1 }}>{l}</Text>
           ))}
 
           <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.1)', marginVertical: 4 }} />
 
-          {/* 2. BOUNDING BOXES */}
-          <TouchableOpacity
-            onPress={() => setAutoSyncBoundingBoxes(!autoSyncBoundingBoxes)}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}
-          >
-            <View style={{ width: 14, height: 14, borderRadius: 7, borderWidth: 2, borderColor: autoSyncBoundingBoxes ? '#4CAF50' : '#666', alignItems: 'center', justifyContent: 'center' }}>
-              {autoSyncBoundingBoxes && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#4CAF50' }} />}
+          {/* 2. BOUNDING BOXES + ROOMPLAN (always on) */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <View style={{ width: 14, height: 14, borderRadius: 7, borderWidth: 2, borderColor: '#4CAF50', alignItems: 'center', justifyContent: 'center' }}>
+              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#4CAF50' }} />
             </View>
-            <Text style={{ color: autoSyncBoundingBoxes ? '#4CAF50' : '#888', fontSize: 10, fontWeight: 'bold', fontFamily: 'monospace', flex: 1 }}>🏠 BOUNDING BOXES (15s)</Text>
-          </TouchableOpacity>
+            <Text style={{ color: '#4CAF50', fontSize: 10, fontWeight: 'bold', fontFamily: 'monospace', flex: 1 }}>🏠 CAD + ROOMPLAN (15s)</Text>
+          </View>
           {logsB.length > 0 && logsB.slice(0, 3).map((l, i) => (
             <Text key={`b${i}`} style={{ color: l.includes('❌') ? '#f66' : '#8f8', fontSize: 8, fontFamily: 'monospace', paddingLeft: 20, marginBottom: 1 }}>{l}</Text>
           ))}
 
           <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.1)', marginVertical: 4 }} />
 
-          {/* 3. MESHES */}
-          <TouchableOpacity
-            onPress={() => setAutoSyncMeshes(!autoSyncMeshes)}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}
-          >
-            <View style={{ width: 14, height: 14, borderRadius: 7, borderWidth: 2, borderColor: autoSyncMeshes ? '#FF9800' : '#666', alignItems: 'center', justifyContent: 'center' }}>
-              {autoSyncMeshes && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#FF9800' }} />}
+          {/* 3. MESHES (auto on scan stop) */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <View style={{ width: 14, height: 14, borderRadius: 7, borderWidth: 2, borderColor: '#FF9800', alignItems: 'center', justifyContent: 'center' }}>
+              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#FF9800' }} />
             </View>
-            <Text style={{ color: autoSyncMeshes ? '#FF9800' : '#888', fontSize: 10, fontWeight: 'bold', fontFamily: 'monospace', flex: 1 }}>📦 MESHES (on size)</Text>
-          </TouchableOpacity>
-          {/* Chunk size controls */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', paddingLeft: 20, marginBottom: 4, gap: 4 }}>
-            <Text style={{ color: '#FF9800', fontSize: 9, fontFamily: 'monospace' }}>CHUNK: {chunkSizeMB}MB</Text>
-            <TouchableOpacity onPress={() => setChunkSizeMB(Math.max(1, chunkSizeMB - 5))} style={{ backgroundColor: 'rgba(255,100,100,0.3)', borderRadius: 3, paddingHorizontal: 5, paddingVertical: 1 }}>
-              <Text style={{ color: '#f66', fontSize: 10, fontWeight: 'bold' }}>-5</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setChunkSizeMB(Math.max(1, chunkSizeMB - 1))} style={{ backgroundColor: 'rgba(255,100,100,0.2)', borderRadius: 3, paddingHorizontal: 4, paddingVertical: 1 }}>
-              <Text style={{ color: '#f99', fontSize: 10 }}>-1</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setChunkSizeMB(Math.min(50, chunkSizeMB + 1))} style={{ backgroundColor: 'rgba(100,255,100,0.2)', borderRadius: 3, paddingHorizontal: 4, paddingVertical: 1 }}>
-              <Text style={{ color: '#9f9', fontSize: 10 }}>+1</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setChunkSizeMB(Math.min(50, chunkSizeMB + 5))} style={{ backgroundColor: 'rgba(100,255,100,0.3)', borderRadius: 3, paddingHorizontal: 5, paddingVertical: 1 }}>
-              <Text style={{ color: '#6f6', fontSize: 10, fontWeight: 'bold' }}>+5</Text>
-            </TouchableOpacity>
+            <Text style={{ color: '#FF9800', fontSize: 10, fontWeight: 'bold', fontFamily: 'monospace', flex: 1 }}>📦 MESHES (on scan stop)</Text>
           </View>
+          <Text style={{ color: '#FF9800', fontSize: 8, fontFamily: 'monospace', paddingLeft: 20, marginBottom: 2 }}>CHUNK: {chunkSizeMB}MB max</Text>
           {logsMesh.length > 0 && logsMesh.slice(0, 3).map((l, i) => (
             <Text key={`mesh${i}`} style={{ color: l.includes('❌') ? '#f66' : '#fc8', fontSize: 8, fontFamily: 'monospace', paddingLeft: 20, marginBottom: 1 }}>{l}</Text>
           ))}
@@ -1122,17 +1177,6 @@ export default function ARRulerScreen({ navigation }: any) {
           {logsA.length > 0 && logsA.slice(0, 3).map((l, i) => (
             <Text key={`a${i}`} style={{ color: l.includes('❌') ? '#f66' : '#c8f', fontSize: 8, fontFamily: 'monospace', paddingLeft: 20, marginBottom: 1 }}>{l}</Text>
           ))}
-
-          {/* Manual SYNC ALL button */}
-          <TouchableOpacity
-            onPress={() => { addLog('🔄 MANUAL SYNC ALL'); performAutoSave(); }}
-            disabled={isSyncing || !userId || !projectData}
-            style={{ marginTop: 6, paddingVertical: 6, backgroundColor: isSyncing ? 'rgba(255,255,0,0.15)' : 'rgba(0,150,255,0.2)', borderRadius: 6, borderWidth: 1, borderColor: isSyncing ? 'rgba(255,255,0,0.4)' : 'rgba(0,150,255,0.4)', alignItems: 'center' }}
-          >
-            <Text style={{ color: isSyncing ? '#ff0' : '#09f', fontSize: 11, fontWeight: 'bold', fontFamily: 'monospace' }}>
-              {isSyncing ? '🔄 SYNCING...' : '⬆ SYNC ALL NOW'}
-            </Text>
-          </TouchableOpacity>
         </ScrollView>
       )}
 

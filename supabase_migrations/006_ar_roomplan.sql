@@ -18,6 +18,9 @@ CREATE TABLE IF NOT EXISTS ar_roomplan (
   door_count INTEGER DEFAULT 0,
   window_count INTEGER DEFAULT 0,
   object_count INTEGER DEFAULT 0,
+  is_finalized BOOLEAN DEFAULT FALSE,
+  inferred_ceiling_y REAL,
+  inferred_floor_y REAL,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );

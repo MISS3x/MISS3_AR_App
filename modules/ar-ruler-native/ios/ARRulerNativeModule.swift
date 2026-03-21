@@ -130,6 +130,10 @@ public class ARRulerNativeModule: Module {
       AsyncFunction("exportRoomPlanData") { (view: ARRulerNativeView) -> [String: Any] in
         return view.exportRoomPlanData()
       }
+
+      AsyncFunction("finalizeRoomPlan") { (view: ARRulerNativeView) in
+        view.finalizeRoomPlan()
+      }
     }
   }
 }

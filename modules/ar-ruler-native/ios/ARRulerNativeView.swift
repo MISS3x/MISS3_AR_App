@@ -1198,6 +1198,15 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
     return [:]
   }
 
+  // MARK: - Finalize RoomPlan (RoomBuilder ML post-processing)
+  func finalizeRoomPlan() {
+    if #available(iOS 16.0, *) {
+        if let rpc = roomPlanController as? RoomPlanController {
+            rpc.finalizeRoom()
+        }
+    }
+  }
+
   // MARK: - Load Shapes from Supabase
   func loadShapes(shapes: [[String: Any]]) -> Int {
     var count = 0
@@ -1907,7 +1916,14 @@ extension UIColor {
 class RoomPlanController: NSObject, RoomCaptureSessionDelegate {
     var session: RoomCaptureSession?
     var latestRoom: CapturedRoom?
+    var finalizedRoom: CapturedRoom?  // Post-processed by RoomBuilder
+    var capturedRoomData: CapturedRoomData?  // Raw data for RoomBuilder
+    var isFinalized: Bool = false
     weak var sceneView: ARSCNView?
+    
+    // Inferred ceiling
+    var inferredCeilingY: Float?
+    var inferredFloorY: Float?
     
     // Nodes for real-time rendering
     private var roomNodes: [SCNNode] = []
@@ -1920,6 +1936,7 @@ class RoomPlanController: NSObject, RoomCaptureSessionDelegate {
     private let floorColor = UIColor(red: 0.0, green: 0.8, blue: 0.3, alpha: 0.15)
     private let openingColor = UIColor(red: 0.8, green: 0.8, blue: 0.0, alpha: 0.25)
     private let objectColor = UIColor(red: 0.9, green: 0.3, blue: 0.9, alpha: 0.2)
+    private let ceilingColor = UIColor(red: 0.7, green: 0.7, blue: 0.9, alpha: 0.1)
     
     func start(arSession: ARSession) {
         if #available(iOS 17.0, *) {
@@ -1927,6 +1944,9 @@ class RoomPlanController: NSObject, RoomCaptureSessionDelegate {
             session = RoomCaptureSession(arSession: arSession)
             session?.delegate = self
             session?.run(configuration: config)
+            isFinalized = false
+            finalizedRoom = nil
+            capturedRoomData = nil
             // Add root node to scene
             sceneView?.scene.rootNode.addChildNode(roomRootNode)
             print("[RoomPlan] Session started")
@@ -1935,12 +1955,13 @@ class RoomPlanController: NSObject, RoomCaptureSessionDelegate {
     
     func stop() {
         session?.stop()
-        roomRootNode.removeFromParentNode()
-        print("[RoomPlan] Session stopped")
+        // Don't remove visualization — keep it visible
+        print("[RoomPlan] Session stopped, waiting for finalization...")
     }
     
     func captureSession(_ session: RoomCaptureSession, didUpdate room: CapturedRoom) {
         self.latestRoom = room
+        inferCeilingAndFloor(from: room)
         DispatchQueue.main.async { [weak self] in
             self?.updateARVisualization(room: room)
         }
@@ -1950,8 +1971,61 @@ class RoomPlanController: NSObject, RoomCaptureSessionDelegate {
         if let error = error {
             print("[RoomPlan] Session ended with error: \(error.localizedDescription)")
         } else {
-            print("[RoomPlan] Session ended successfully")
+            print("[RoomPlan] Session ended, storing CapturedRoomData for finalization")
+            self.capturedRoomData = data
+            // Auto-finalize
+            finalizeRoom()
         }
+    }
+    
+    // MARK: - RoomBuilder Finalization (ML post-processing)
+    
+    func finalizeRoom() {
+        guard let data = capturedRoomData else {
+            print("[RoomPlan] No CapturedRoomData to finalize")
+            return
+        }
+        
+        print("[RoomPlan] Starting RoomBuilder finalization...")
+        
+        Task {
+            do {
+                let roomBuilder = RoomBuilder(options: [.beautifyObjects])
+                let finalRoom = try await roomBuilder.capturedRoom(from: data)
+                
+                await MainActor.run {
+                    self.finalizedRoom = finalRoom
+                    self.latestRoom = finalRoom  // Override preview with clean version
+                    self.isFinalized = true
+                    self.inferCeilingAndFloor(from: finalRoom)
+                    self.updateARVisualization(room: finalRoom)
+                    print("[RoomPlan] ✅ Finalized! Walls:\(finalRoom.walls.count) Doors:\(finalRoom.doors.count) Win:\(finalRoom.windows.count) Obj:\(finalRoom.objects.count)")
+                }
+            } catch {
+                print("[RoomPlan] ❌ RoomBuilder error: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    // MARK: - Ceiling / Floor Inference
+    
+    private func inferCeilingAndFloor(from room: CapturedRoom) {
+        guard !room.walls.isEmpty else { return }
+        
+        var maxY: Float = -Float.greatestFiniteMagnitude
+        var minY: Float = Float.greatestFiniteMagnitude
+        
+        for wall in room.walls {
+            let posY = wall.transform.columns.3.y
+            let halfH = wall.dimensions.y / 2
+            let topY = posY + halfH
+            let bottomY = posY - halfH
+            if topY > maxY { maxY = topY }
+            if bottomY < minY { minY = bottomY }
+        }
+        
+        inferredCeilingY = maxY
+        inferredFloorY = minY
     }
     
     // MARK: - Real-time AR Visualization
@@ -2170,7 +2244,10 @@ class RoomPlanController: NSObject, RoomCaptureSessionDelegate {
             "wallCount": walls.count,
             "doorCount": doors.count,
             "windowCount": windows.count,
-            "objectCount": objects.count
+            "objectCount": objects.count,
+            "isFinalized": isFinalized,
+            "inferredCeilingY": inferredCeilingY as Any,
+            "inferredFloorY": inferredFloorY as Any
         ]
     }
     

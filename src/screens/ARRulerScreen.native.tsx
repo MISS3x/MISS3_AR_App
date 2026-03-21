@@ -637,9 +637,12 @@ export default function ARRulerScreen({ navigation }: any) {
                 door_count: roomData.doorCount,
                 window_count: roomData.windowCount,
                 object_count: roomData.objectCount,
+                is_finalized: roomData.isFinalized ?? false,
+                inferred_ceiling_y: roomData.inferredCeilingY ?? null,
+                inferred_floor_y: roomData.inferredFloorY ?? null,
                 updated_at: new Date().toISOString(),
               }, { onConflict: 'id' });
-              addLogB(`✅ RoomPlan: ${roomData.wallCount}W ${roomData.doorCount}D ${roomData.windowCount}Wi ${roomData.objectCount}O`);
+              addLogB(`✅ RoomPlan${roomData.isFinalized ? ' [FINAL]' : ''}: ${roomData.wallCount}W ${roomData.doorCount}D ${roomData.windowCount}Wi ${roomData.objectCount}O`);
             } else {
               addLogB(`✅ CAD synced (no RoomPlan yet)`);
             }

@@ -2144,10 +2144,11 @@ class RoomPlanController: NSObject, RoomCaptureSessionDelegate {
         let boxNode = SCNNode(geometry: box)
         container.addChildNode(boxNode)
         
-        // Wireframe edges
-        let wireBox = SCNBox(width: CGFloat(dimensions.x) + 0.002, height: CGFloat(dimensions.y) + 0.002, length: CGFloat(dimensions.z) + 0.002, chamferRadius: 0)
+        // Wireframe edges — THICK offset for visibility
+        let offset: CGFloat = 0.01
+        let wireBox = SCNBox(width: CGFloat(dimensions.x) + offset, height: CGFloat(dimensions.y) + offset, length: CGFloat(dimensions.z) + offset, chamferRadius: 0)
         let wireMaterial = SCNMaterial()
-        wireMaterial.diffuse.contents = color.withAlphaComponent(0.8)
+        wireMaterial.diffuse.contents = color.withAlphaComponent(1.0)
         wireMaterial.lightingModel = .constant
         wireMaterial.fillMode = .lines
         wireMaterial.isDoubleSided = true
@@ -2155,24 +2156,56 @@ class RoomPlanController: NSObject, RoomCaptureSessionDelegate {
         let wireNode = SCNNode(geometry: wireBox)
         container.addChildNode(wireNode)
         
-        // Label above
-        let text = SCNText(string: label, extrusionDepth: 0.5)
-        text.font = UIFont.systemFont(ofSize: 4, weight: .bold)
+        // Label above — LARGE with emoji prefix and background
+        let emoji: String
+        switch label {
+        case "Wall": emoji = "🧱"
+        case "Door": emoji = "🚪"
+        case "Window": emoji = "🪟"
+        case "Floor": emoji = "⬛"
+        case "Opening": emoji = "🚶"
+        case "Table": emoji = "🪑"
+        case "Chair": emoji = "💺"
+        case "Sofa": emoji = "🛋"
+        case "Bed": emoji = "🛏"
+        case "TV": emoji = "📺"
+        default: emoji = "📦"
+        }
+        
+        let displayLabel = "\(emoji) \(label)"
+        let text = SCNText(string: displayLabel, extrusionDepth: 0.5)
+        text.font = UIFont.systemFont(ofSize: 8, weight: .heavy)
         text.flatness = 0.1
         let textMat = SCNMaterial()
         textMat.diffuse.contents = UIColor.white
         textMat.lightingModel = .constant
         text.materials = [textMat]
         let textNode = SCNNode(geometry: text)
-        textNode.scale = SCNVector3(0.005, 0.005, 0.005)
+        textNode.scale = SCNVector3(0.008, 0.008, 0.008)
         let (minBound, maxBound) = textNode.boundingBox
+        let textW = (maxBound.x - minBound.x) * 0.008
+        let textH = (maxBound.y - minBound.y) * 0.008
         textNode.position = SCNVector3(
-            -(maxBound.x - minBound.x) * 0.005 / 2,
-            dimensions.y / 2 + 0.05,
+            -textW / 2,
+            dimensions.y / 2 + 0.08,
             0
         )
-        textNode.constraints = [SCNBillboardConstraint()]
-        container.addChildNode(textNode)
+        
+        // Background pill behind text
+        let bgPlane = SCNPlane(width: CGFloat(textW + 0.04), height: CGFloat(textH + 0.02))
+        let bgMat = SCNMaterial()
+        bgMat.diffuse.contents = UIColor.black.withAlphaComponent(0.75)
+        bgMat.lightingModel = .constant
+        bgPlane.materials = [bgMat]
+        bgPlane.cornerRadius = CGFloat(textH * 0.3)
+        let bgNode = SCNNode(geometry: bgPlane)
+        bgNode.position = SCNVector3(0, dimensions.y / 2 + 0.08 + textH / 2, -0.001)
+        
+        let labelGroup = SCNNode()
+        labelGroup.addChildNode(bgNode)
+        labelGroup.addChildNode(textNode)
+        labelGroup.constraints = [SCNBillboardConstraint()]
+        container.addChildNode(labelGroup)
         
         // Apply transform
         container.simdTransform = transform

@@ -899,17 +899,22 @@ export default function ARRulerScreen({ navigation }: any) {
         </TouchableOpacity>
       </View>
 
-      {/* Login badge — right below header */}
-      <View style={[styles.debugWindow, { top: insets.top + 36 }]}>
-        <Text style={styles.debugTitle}>
-          {userId ? `🟢 ${userEmail || 'Logged In'}` : '🔴 Anonymous'}
+      {/* Compact status bar — login + HIDE toggle on one line */}
+      <View style={{ position: 'absolute', right: 12, top: insets.top + 48, left: 12, zIndex: 100, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+        <Text style={{ color: userId ? '#0f0' : '#f66', fontSize: 8, fontFamily: 'monospace', flex: 1 }}>
+          {userId ? `● ${userEmail}` : '○ Anon'} | S:{shapeCount} P:{pendingCount} ✓:{uploadedCount}
         </Text>
-        <Text style={styles.debugText}>Shapes: {shapeCount} | Pending: {pendingCount} | Synced: {uploadedCount}</Text>
+        <TouchableOpacity
+          onPress={() => setShowDebugPanel(!showDebugPanel)}
+          style={{ backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}
+        >
+          <Text style={{ color: '#0f0', fontSize: 9, fontFamily: 'monospace' }}>{showDebugPanel ? '▼ HIDE' : '▶ SYNC'}</Text>
+        </TouchableOpacity>
       </View>
       
 
 
-      {/* Tool buttons — right side vertical (symmetric with FLOOR/FREE/WALL on left) */}
+      {/* Tool buttons — right side: WIRE + START SCAN (mirror of left FLOOR/FREE/WALL) */}
       <View style={{ position: 'absolute', right: 12, bottom: insets.bottom + 100, zIndex: 15, gap: 6 }} pointerEvents="box-none">
          <TouchableOpacity 
            style={[styles.modeButton, showWire && { ...styles.modeButtonActive, borderColor: tronBlue, backgroundColor: 'rgba(51,204,255,0.15)' }]}
@@ -932,32 +937,13 @@ export default function ARRulerScreen({ navigation }: any) {
             {isRoomFinalizing ? (
               <>
                 <ActivityIndicator size="small" color="#FFD600" />
-                <Text style={[styles.modeButtonText, { color: '#FFD600', fontSize: 8 }]}>FINAL{"\n"}IZING</Text>
+                <Text style={[styles.modeButtonText, { color: '#FFD600', fontSize: 9 }]}>WAIT</Text>
               </>
             ) : isRoomScanning ? (
-              <Text style={[styles.modeButtonText, { color: '#FF1744' }]}>🛑{"\n"}STOP{"\n"}SCAN</Text>
+              <Text style={[styles.modeButtonText, { color: '#FF1744' }]}>STOP{"\n"}SCAN</Text>
             ) : (
-              <Text style={[styles.modeButtonText, { color: '#4CAF50' }]}>🏠{"\n"}START{"\n"}SCAN</Text>
+              <Text style={[styles.modeButtonText, { color: '#4CAF50' }]}>SCAN{"\n"}ROOM</Text>
             )}
-         </TouchableOpacity>
-
-         <TouchableOpacity 
-           style={[styles.modeButton, cutActive && { ...styles.modeButtonActive, borderColor: '#FF4D00', backgroundColor: 'rgba(255,77,0,0.15)' }]}
-           onPress={async () => {
-             if (cutActive) {
-               await rulerRef.current?.clearCut();
-               setCutActive(false);
-               setCutPointCount(0);
-               setPrompt('Cut cleared.');
-             } else {
-               setCutActive(true);
-               await rulerRef.current?.setCutActive(true, cutType);
-               setPrompt(`Cut ${cutType} — adjust with controls`);
-             }
-           }}
-           activeOpacity={0.7}
-         >
-            <Text style={[styles.modeButtonText, cutActive && { color: '#FF4D00' }]}>CUT{"\n"}{cutActive ? 'ON' : 'OFF'}</Text>
          </TouchableOpacity>
       </View>
 
@@ -1115,67 +1101,57 @@ export default function ARRulerScreen({ navigation }: any) {
          <View style={styles.measureDivider} />
       </View>
 
-      {/* ===== SYNC PANEL ===== */}
-      <TouchableOpacity
-        style={{ position: 'absolute', right: 12, top: insets.top + 50, zIndex: 100, backgroundColor: 'rgba(0,0,0,0.7)', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 }}
-        onPress={() => setShowDebugPanel(!showDebugPanel)}
-      >
-        <Text style={{ color: '#0f0', fontSize: 10, fontFamily: 'monospace' }}>{showDebugPanel ? '⚙ HIDE' : '⚙ SYNC'}</Text>
-      </TouchableOpacity>
+      {/* ===== SYNC LOG — full-width, collapsible ===== */}
+      {!showDebugPanel && (
+        <View style={{ position: 'absolute', left: 12, right: 12, top: insets.top + 62, zIndex: 98, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, flexDirection: 'row', gap: 8 }}>
+          {logsM.length > 0 && <Text style={{ color: '#33CCFF', fontSize: 7, fontFamily: 'monospace', flex: 1 }} numberOfLines={1}>📐 {logsM[0]?.replace(/\[.*?\]\s*/, '')}</Text>}
+          {logsB.length > 0 && <Text style={{ color: '#4CAF50', fontSize: 7, fontFamily: 'monospace', flex: 1 }} numberOfLines={1}>🏠 {logsB[0]?.replace(/\[.*?\]\s*/, '')}</Text>}
+        </View>
+      )}
 
       {showDebugPanel && (
-        <ScrollView style={{ position: 'absolute', right: 12, top: insets.top + 80, width: 270, maxHeight: 420, backgroundColor: 'rgba(0,0,0,0.9)', borderRadius: 10, padding: 8, zIndex: 99, borderWidth: 1, borderColor: 'rgba(0,255,100,0.3)' }}>
+        <ScrollView style={{ position: 'absolute', left: 12, right: 12, top: insets.top + 62, maxHeight: 380, backgroundColor: 'rgba(0,0,0,0.85)', borderRadius: 10, padding: 8, zIndex: 99, borderWidth: 1, borderColor: 'rgba(0,255,100,0.2)' }}>
           
-          {/* 1. MEASUREMENTS (always on) */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-            <View style={{ width: 14, height: 14, borderRadius: 7, borderWidth: 2, borderColor: '#33CCFF', alignItems: 'center', justifyContent: 'center' }}>
-              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#33CCFF' }} />
-            </View>
-            <Text style={{ color: '#33CCFF', fontSize: 10, fontWeight: 'bold', fontFamily: 'monospace', flex: 1 }}>📐 MEASUREMENTS (15s)</Text>
-            <Text style={{ color: '#555', fontSize: 8, fontFamily: 'monospace' }}>floor/wall/free</Text>
+          {/* 1. MEASUREMENTS */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#33CCFF' }} />
+            <Text style={{ color: '#33CCFF', fontSize: 9, fontWeight: 'bold', fontFamily: 'monospace', flex: 1 }}>MEASUREMENTS (15s)</Text>
           </View>
-          {logsM.length > 0 && logsM.slice(0, 3).map((l, i) => (
-            <Text key={`m${i}`} style={{ color: l.includes('❌') ? '#f66' : '#8cf', fontSize: 8, fontFamily: 'monospace', paddingLeft: 20, marginBottom: 1 }}>{l}</Text>
+          {logsM.slice(0, 2).map((l, i) => (
+            <Text key={`m${i}`} style={{ color: l.includes('❌') ? '#f66' : '#8cf', fontSize: 7, fontFamily: 'monospace', paddingLeft: 14, marginBottom: 1 }}>{l}</Text>
           ))}
 
-          <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.1)', marginVertical: 4 }} />
+          <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.08)', marginVertical: 3 }} />
 
-          {/* 2. BOUNDING BOXES + ROOMPLAN (always on) */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-            <View style={{ width: 14, height: 14, borderRadius: 7, borderWidth: 2, borderColor: '#4CAF50', alignItems: 'center', justifyContent: 'center' }}>
-              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#4CAF50' }} />
-            </View>
-            <Text style={{ color: '#4CAF50', fontSize: 10, fontWeight: 'bold', fontFamily: 'monospace', flex: 1 }}>🏠 CAD + ROOMPLAN (15s)</Text>
+          {/* 2. CAD + ROOMPLAN */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#4CAF50' }} />
+            <Text style={{ color: '#4CAF50', fontSize: 9, fontWeight: 'bold', fontFamily: 'monospace', flex: 1 }}>CAD + ROOMPLAN (15s)</Text>
           </View>
-          {logsB.length > 0 && logsB.slice(0, 3).map((l, i) => (
-            <Text key={`b${i}`} style={{ color: l.includes('❌') ? '#f66' : '#8f8', fontSize: 8, fontFamily: 'monospace', paddingLeft: 20, marginBottom: 1 }}>{l}</Text>
+          {logsB.slice(0, 2).map((l, i) => (
+            <Text key={`b${i}`} style={{ color: l.includes('❌') ? '#f66' : '#8f8', fontSize: 7, fontFamily: 'monospace', paddingLeft: 14, marginBottom: 1 }}>{l}</Text>
           ))}
 
-          <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.1)', marginVertical: 4 }} />
+          <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.08)', marginVertical: 3 }} />
 
-          {/* 3. MESHES (auto on scan stop) */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-            <View style={{ width: 14, height: 14, borderRadius: 7, borderWidth: 2, borderColor: '#FF9800', alignItems: 'center', justifyContent: 'center' }}>
-              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#FF9800' }} />
-            </View>
-            <Text style={{ color: '#FF9800', fontSize: 10, fontWeight: 'bold', fontFamily: 'monospace', flex: 1 }}>📦 MESHES (on scan stop)</Text>
+          {/* 3. ANCHORS */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#9C27B0' }} />
+            <Text style={{ color: '#CE93D8', fontSize: 9, fontWeight: 'bold', fontFamily: 'monospace' }}>ANCHORS (always)</Text>
           </View>
-          <Text style={{ color: '#FF9800', fontSize: 8, fontFamily: 'monospace', paddingLeft: 20, marginBottom: 2 }}>CHUNK: {chunkSizeMB}MB max</Text>
-          {logsMesh.length > 0 && logsMesh.slice(0, 3).map((l, i) => (
-            <Text key={`mesh${i}`} style={{ color: l.includes('❌') ? '#f66' : '#fc8', fontSize: 8, fontFamily: 'monospace', paddingLeft: 20, marginBottom: 1 }}>{l}</Text>
+          {logsA.slice(0, 2).map((l, i) => (
+            <Text key={`a${i}`} style={{ color: l.includes('❌') ? '#f66' : '#c8f', fontSize: 7, fontFamily: 'monospace', paddingLeft: 14, marginBottom: 1 }}>{l}</Text>
           ))}
 
-          <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.1)', marginVertical: 4 }} />
+          <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.08)', marginVertical: 3 }} />
 
-          {/* 4. ANCHORS (always on) */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-            <View style={{ width: 14, height: 14, borderRadius: 7, borderWidth: 2, borderColor: '#9C27B0', alignItems: 'center', justifyContent: 'center' }}>
-              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#9C27B0' }} />
-            </View>
-            <Text style={{ color: '#CE93D8', fontSize: 10, fontWeight: 'bold', fontFamily: 'monospace' }}>⚓ ANCHORS (always on)</Text>
+          {/* 4. MESHES */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#FF9800' }} />
+            <Text style={{ color: '#FF9800', fontSize: 9, fontWeight: 'bold', fontFamily: 'monospace', flex: 1 }}>MESHES ({chunkSizeMB}MB chunks)</Text>
           </View>
-          {logsA.length > 0 && logsA.slice(0, 3).map((l, i) => (
-            <Text key={`a${i}`} style={{ color: l.includes('❌') ? '#f66' : '#c8f', fontSize: 8, fontFamily: 'monospace', paddingLeft: 20, marginBottom: 1 }}>{l}</Text>
+          {logsMesh.slice(0, 2).map((l, i) => (
+            <Text key={`mesh${i}`} style={{ color: l.includes('❌') ? '#f66' : '#fc8', fontSize: 7, fontFamily: 'monospace', paddingLeft: 14, marginBottom: 1 }}>{l}</Text>
           ))}
         </ScrollView>
       )}

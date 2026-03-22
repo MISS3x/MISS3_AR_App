@@ -1,17 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Modal, FlatList, Alert, ScrollView, PanResponder } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Modal, FlatList, Alert, Animated } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import {
   ViroARSceneNavigator, ViroARScene, Viro3DObject, ViroAmbientLight,
   ViroNode, ViroDirectionalLight, ViroQuad, ViroMaterials,
-  ViroARPlaneSelector, ViroBox, ViroARPlane, ViroAnimations, ViroText
+  ViroARPlane, ViroAnimations,
+  ViroBox,
+  ViroSphere,
+  ViroPolyline
 } from '@reactvision/react-viro';
 import * as FileSystem from 'expo-file-system/legacy';
+import { Asset } from 'expo-asset';
 
 import { colors, spacing, borderRadius, typography, shadows } from '../theme/theme';
 import { supabase } from '../lib/supabase';
-// Removed lidar-mesh imports
 
 ViroMaterials.createMaterials({
   clayMaterial: {
@@ -23,18 +26,28 @@ ViroMaterials.createMaterials({
   trackingMaterial: {
     lightingModel: "Constant",
     blendMode: "Add",
-    diffuseColor: "rgba(0, 255, 255, 0.15)",
+    diffuseColor: "rgba(0, 255, 255, 0.08)",
+  },
+  // X-ray ghost material — solid cyan translucent
+  xrayMaterial: {
+    lightingModel: "Constant",
+    diffuseColor: "rgba(0, 200, 255, 0.7)",
+  },
+  // Reticle circle on floor — 50cm, bright cyan
+  reticleCircleMaterial: {
+    lightingModel: "Constant",
+    diffuseColor: "rgba(0, 255, 255, 0.6)",
+  },
+  // Inner dot of reticle
+  reticleDotMaterial: {
+    lightingModel: "Constant",
+    diffuseColor: "rgba(0, 255, 255, 0.9)",
   },
   ringMaterial: {
     lightingModel: "Constant",
     blendMode: "Add",
     diffuseColor: "rgba(0, 255, 255, 0.0)"
   },
-  wireMaterial: {
-    lightingModel: "Constant",
-    blendMode: "Add",
-    diffuseColor: "rgba(0, 255, 200, 0.4)" // Soft semi-transparent wire mesh
-  }
 });
 
 ViroAnimations.registerAnimations({
@@ -42,18 +55,23 @@ ViroAnimations.registerAnimations({
     properties: { scaleX: 3, scaleY: 3, scaleZ: 3, opacity: 0 },
     duration: 1000,
     easing: "EaseOut"
-  }
+  },
+  reticlePulse: {
+    properties: { scaleX: 1.15, scaleY: 1.15, scaleZ: 1.15, opacity: 0.4 },
+    duration: 1500,
+    easing: "EaseInEaseOut"
+  },
 });
 
 interface ARPlacedObject {
-  id: string;             // Unique instance ID
-  title: string;          // Model Title
-  localUri: string;       // Local absolute file path
+  id: string;
+  title: string;
+  localUri: string;
   position: [number, number, number];
   scale: [number, number, number];
   rotation: [number, number, number];
-  yOffset: number;        // Cached bounding box offset
-  modelOffset: [number, number, number]; // Pivot offset from web editor
+  yOffset: number;
+  modelOffset: [number, number, number];
 }
 
 interface CatalogModel {
@@ -71,9 +89,9 @@ interface CatalogModel {
 }
 
 
-// Extract components outside the main function so ViroReact doesn't destroy and recreate them on every render
 const ARNodeComponent = ({ obj, index, setPlacedObjects, arSceneRef }: { obj: ARPlacedObject, index: number, setPlacedObjects: any, arSceneRef?: any }) => {
   const nodeRef = useRef<any>(null);
+  const modelRef = useRef<any>(null);
   const currentScale = useRef<[number, number, number]>(obj.scale);
   const currentRotation = useRef<[number, number, number]>(obj.rotation);
   const gestureBaseScale = useRef<[number, number, number]>(obj.scale);
@@ -104,44 +122,31 @@ const ARNodeComponent = ({ obj, index, setPlacedObjects, arSceneRef }: { obj: AR
   const lastHitTest = useRef<number>(0);
 
   const handleDrag = (dragToPos: number[], source: any) => {
-    // 1. Update position state for 2D map tracking by explicitly matching the unique ID, 
-    // avoiding stale index closures when multiple identical objects are spawned.
     setPlacedObjects((prev: ARPlacedObject[]) => {
       return prev.map(p =>
         p.id === obj.id ? { ...p, position: [dragToPos[0], dragToPos[1], dragToPos[2]] as [number, number, number] } : p
       );
     });
 
-    // 2. Perform Native ARKit HitTest to find the normal of the surface we dragged onto
     const now = Date.now();
     if (arSceneRef && arSceneRef.current && (now - lastHitTest.current > 100)) {
        lastHitTest.current = now;
        arSceneRef.current.performARHitTestWithPosition(dragToPos).then((results: any) => {
           if (results && results.length > 0) {
              const hit = results[0];
-             // hit.transform.rotation is the normal rotation of the plane!
-             // If the user drags onto a wall, this rotation represents the wall's outward normal.
              if (hit.transform && hit.transform.rotation) {
-                // To attach the object flush against the wall, we might need to combine this base surface rotation 
-                // with the user's twist rotation. For now, let's just snap the base explicitly if it drastically changes.
-                // An ARKit floor is typically [0,0,0]. A wall is typically rotated on X or Z by 90/-90.
                 const snapRot = hit.transform.rotation;
-                
-                // Only snap to wall normal if the surface is noticeably vertical (e.g. pitch or roll > 45 deg)
                 const isWall = Math.abs(snapRot[0]) > 45 || Math.abs(snapRot[2]) > 45;
                 if (isWall) {
-                   // We assign the wall's native matrix rotation as our object's rotation baseline
                    currentRotation.current = [snapRot[0], snapRot[1], snapRot[2]];
-                   // Update visually instantly
                    if (nodeRef.current) nodeRef.current.setNativeProps({ rotation: currentRotation.current });
                 } else {
-                   // Return to flat ground upright, retaining user's Y-axis twist
                    currentRotation.current = [0, currentRotation.current[1], 0];
                    if (nodeRef.current) nodeRef.current.setNativeProps({ rotation: currentRotation.current });
                 }
              }
           }
-       }).catch(() => {}); // ignore hit test errors silently
+       }).catch(() => {});
     }
   };
 
@@ -158,6 +163,7 @@ const ARNodeComponent = ({ obj, index, setPlacedObjects, arSceneRef }: { obj: AR
       onRotate={onRotate}
     >
       <Viro3DObject
+        ref={modelRef}
         source={{ uri: obj.localUri }}
         type={(() => {
           const ext = obj.localUri.split('.').pop()?.toUpperCase() || 'GLB';
@@ -166,26 +172,30 @@ const ARNodeComponent = ({ obj, index, setPlacedObjects, arSceneRef }: { obj: AR
         position={[obj.modelOffset[0], obj.yOffset + obj.modelOffset[1], obj.modelOffset[2]]}
         scale={[1, 1, 1]}
         onLoadEnd={async () => {
-          if (nodeRef.current && nodeRef.current.getBoundingBoxAsync && obj.yOffset === 0) {
+          // Calculate bounding box to offset pivot → bottom sits on floor
+          if (modelRef.current && modelRef.current.getBoundingBoxAsync && obj.yOffset === 0) {
              try {
-                const boundingBox = await nodeRef.current.getBoundingBoxAsync();
-                if (boundingBox && boundingBox.minY < 0) {
-                   const shift = Math.abs(boundingBox.minY);
-                   setPlacedObjects((prev: ARPlacedObject[]) => {
-                      const next = [...prev];
-                      if (next[index]) next[index] = { ...next[index], yOffset: shift };
-                      return next;
-                   });
+                const result = await modelRef.current.getBoundingBoxAsync();
+                if (result && result.boundingBox && typeof result.boundingBox.minY === 'number') {
+                   // Shift by inverted minY to align the exact bottom of the mesh to Y=0
+                   const shift = -result.boundingBox.minY + 0.01; 
+                   console.log(`[Model ${obj.title}] BBox minY=${result.boundingBox.minY.toFixed(3)} → yOffset=${shift.toFixed(3)}`);
+                   // Use obj.id (not index!) to find correct object — index may be stale
+                   setPlacedObjects((prev: ARPlacedObject[]) => 
+                     prev.map(p => p.id === obj.id ? { ...p, yOffset: shift } : p)
+                   );
                 }
-             } catch (e) {}
+             } catch (e) {
+               console.log(`[Model ${obj.title}] getBoundingBoxAsync failed:`, e);
+             }
           }
         }}
       />
       <ViroQuad
-        position={[0, -0.01, 0]}
+        position={[0, 0.002, 0]}
         rotation={[-90, 0, 0]}
-        width={10}
-        height={10}
+        width={3}
+        height={3}
         arShadowReceiver={true}
         ignoreEventHandling={true}
       />
@@ -193,82 +203,69 @@ const ARNodeComponent = ({ obj, index, setPlacedObjects, arSceneRef }: { obj: AR
   );
 };
 
+const circlePoints: [number, number, number][] = Array.from({ length: 33 }).map((_, i) => {
+  const angle = (i / 32) * Math.PI * 2;
+  return [Math.cos(angle) * 0.25, 0.001, Math.sin(angle) * 0.25];
+});
+
 const ARScene = (props: any) => {
   const { 
      placedObjects, setPlacedObjects, 
      planes, setPlanes,
-     pendingModelContext, setPendingModelContext
+     pendingModelContext, setPendingModelContext,
+     ghostPosition, setGhostPosition,
+     onPlaceGhost,
+     crystalUri
   } = props.sceneNavigator.viroAppProps;
   
   const [rings, setRings] = useState<{ id: number; position: [number, number, number] }[]>([]);
   const lastAnchorUpdate = useRef<number>(0);
   const arSceneRef = useRef<any>(null);
-  const lastTapTime = useRef<number>(0);
+
+  // Continuous floor hit-test for ghost preview
+  const lastGhostUpdate = useRef<number>(0);
+  
+  const handleCameraTransform = () => {
+    if (!arSceneRef.current) return;
+    
+    const now = Date.now();
+    if (now - lastGhostUpdate.current < 100) return; // 10fps for ghost
+    lastGhostUpdate.current = now;
+    
+    arSceneRef.current.getCameraOrientationAsync().then((cam: any) => {
+      if (!cam || !cam.position || !cam.forward) return;
+      // Cast a ray from camera forward 3m toward floor for a better projection distance
+      const rayEnd = [
+        cam.position[0] + cam.forward[0] * 3,
+        cam.position[1] + cam.forward[1] * 3,
+        cam.position[2] + cam.forward[2] * 3
+      ];
+      arSceneRef.current.performARHitTestWithPosition(rayEnd).then((results: any) => {
+        if (results && results.length > 0) {
+          // Reverting to the logic that worked well for the user:
+          // Find any hit with a roughly horizontal rotation, regardless of plane typing.
+          const floorHit = results.find((hit: any) => {
+            if (!hit.transform || !hit.transform.rotation) return false;
+            const rot = hit.transform.rotation;
+            return Math.abs(rot[0]) < 20 && Math.abs(rot[2]) < 20;
+          });
+          
+          if (floorHit) {
+            const pos = floorHit.transform.position || rayEnd;
+            setGhostPosition([pos[0], pos[1], pos[2]]);
+          } else {
+             // Fallback: If no flat hit point found, project safely to 1.5m below camera height.
+             const fallbackY = cam.position[1] - 1.5;
+             setGhostPosition([rayEnd[0], fallbackY, rayEnd[2]]);
+          }
+        }
+      }).catch(() => {});
+    }).catch(() => {});
+  };
 
   const handleSceneClick = (position: number[], source: any) => {
-    if (!position || position.length !== 3) return;
-
-    // Only place objects when a model is pending (user selected from catalog)
-    if (!pendingModelContext) return;
-
-    // Hit-test: verify tap landed on a horizontal floor plane
-    if (arSceneRef && arSceneRef.current) {
-      arSceneRef.current.performARHitTestWithPosition(position).then((results: any) => {
-        if (!results || results.length === 0) return;
-
-        // Find first horizontal surface hit
-        const floorHit = results.find((hit: any) => {
-          if (!hit.transform || !hit.transform.rotation) return false;
-          const rot = hit.transform.rotation;
-          // Floor is mostly flat: X and Z rotation near 0 (< 20 degrees)
-          return Math.abs(rot[0]) < 20 && Math.abs(rot[2]) < 20;
-        });
-
-        if (!floorHit) return; // Didn't hit a floor — ignore
-
-        const hitPos = floorHit.transform.position || position;
-
-        // Collision check — don't place if gizmo overlaps (30cm min distance)
-        const minDist = 0.3;
-        const tooClose = placedObjects.some((obj: ARPlacedObject) => {
-          const dx = obj.position[0] - hitPos[0];
-          const dz = obj.position[2] - hitPos[2];
-          return Math.sqrt(dx*dx + dz*dz) < minDist;
-        });
-
-        if (tooClose) return;
-
-        const scaleArgs = pendingModelContext.model_transform?.scale;
-        const parsedScale: [number, number, number] = scaleArgs ? [scaleArgs.x, scaleArgs.y, scaleArgs.z] : [1, 1, 1];
-        const rotArgs = pendingModelContext.model_transform?.rotation;
-        const parsedRotation: [number, number, number] = rotArgs ? [rotArgs.x, rotArgs.y, rotArgs.z] : [0, 0, 0];
-        const offsetArgs = pendingModelContext.model_transform?.modelOffset;
-        const parsedOffset: [number, number, number] = offsetArgs ? [offsetArgs.x, offsetArgs.y, offsetArgs.z] : [0, 0, 0];
-
-        const newObject: ARPlacedObject = {
-          id: Math.random().toString(36).substring(7),
-          title: pendingModelContext.title || 'Model',
-          localUri: pendingModelContext.localUri,
-          position: [hitPos[0], hitPos[1], hitPos[2]],
-          scale: parsedScale,
-          rotation: parsedRotation,
-          yOffset: 0,
-          modelOffset: parsedOffset,
-        };
-
-        setPlacedObjects((prev: any) => [...prev, newObject]);
-
-        // Clear pending so it's single-placement only
-        setPendingModelContext(null);
-
-        // Ring confirmation on successful placement
-        const id = Date.now();
-        setRings((prev: any) => [...prev, { id, position: [hitPos[0], hitPos[1], hitPos[2]] }]);
-        setTimeout(() => {
-          setRings((prev: any) => prev.filter((r: any) => r.id !== id));
-        }, 1000);
-      }).catch(() => {});
-    }
+    // Disabled placing objects on tap. 
+    // Objects should only be placed using the UI button.
   };
 
   const onAnchorFound = (anchor: any) => {
@@ -303,6 +300,7 @@ const ARScene = (props: any) => {
       onAnchorUpdated={onAnchorUpdated}
       onAnchorRemoved={onAnchorRemoved}
       onClick={handleSceneClick}
+      onCameraTransformUpdate={handleCameraTransform}
     >
       {Object.values(planes).map((p: any) => {
         return (
@@ -319,9 +317,6 @@ const ARScene = (props: any) => {
         );
       })}
 
-      {/* World mesh from ViroReact handles WIRE visualization now */}
-
-
       {rings.map(r => (
         <ViroNode key={r.id} position={r.position}>
           <ViroQuad 
@@ -333,26 +328,82 @@ const ARScene = (props: any) => {
         </ViroNode>
       ))}
 
-      <ViroAmbientLight color="#ffffff" intensity={200} />
-      {/* We use a low shadowMapSize (512) and low opacity to naturally blur the shadow via PCF Native filtering, simulating an Ambient Occlusion contact shadow. */}
+      <ViroAmbientLight color="#ffffff" intensity={250} />
       <ViroDirectionalLight 
         color="#ffffff" 
         direction={[0, -1, -0.2]} 
-        intensity={400} 
-        castsShadow={true} shadowMapSize={512}
-        shadowNearZ={0.1} shadowFarZ={5} shadowOpacity={0.5}
+        intensity={350} 
+        castsShadow={true} 
+        shadowMapSize={2048}
+        shadowNearZ={0.1} 
+        shadowFarZ={8} 
+        shadowOpacity={0.25}
+        shadowOrthographicSize={5}
       />
+
+      {/* Floor reticle — always visible when ghostPosition is available */}
+      {ghostPosition && (
+        <ViroNode position={ghostPosition}>
+          {/* 50cm circle on floor — ViroPolyline outline */}
+          <ViroPolyline
+            position={[0, 0, 0]}
+            points={circlePoints}
+            thickness={0.015}
+            materials={["reticleCircleMaterial"]}
+            animation={{ name: "reticlePulse", run: true, loop: true }}
+          />
+          {/* Center dot */}
+          <ViroSphere 
+            radius={0.015}
+            scale={[1, 0.01, 1]}
+            position={[0, 0.001, 0]}
+            materials={["reticleDotMaterial"]}
+          />
+        </ViroNode>
+      )}
+
+      {/* Ghost preview — x-ray model following floor reticle */}
+      {pendingModelContext && ghostPosition && (
+        <ViroNode position={ghostPosition} opacity={0.65}>
+          {/* Ghost 3D model with x-ray material */}
+          <Viro3DObject
+            source={{ uri: pendingModelContext.localUri }}
+            resources={[]}
+            type={(() => {
+              const ext = pendingModelContext.localUri.split('.').pop()?.toUpperCase() || 'GLB';
+              return ext === 'GLTF' ? 'GLTF' : ext === 'OBJ' ? 'OBJ' : ext === 'VRX' ? 'VRX' : 'GLB';
+            })()}
+            position={[
+              pendingModelContext.model_transform?.modelOffset?.x || 0,
+              pendingModelContext.model_transform?.modelOffset?.y || 0,
+              pendingModelContext.model_transform?.modelOffset?.z || 0
+            ]}
+            scale={[
+              pendingModelContext.model_transform?.scale?.x || 1,
+              pendingModelContext.model_transform?.scale?.y || 1,
+              pendingModelContext.model_transform?.scale?.z || 1
+            ]}
+            materials={["xrayMaterial"]}
+          />
+        </ViroNode>
+      )}
+
+      {/* Demo ghost — local Crystal primitive when no model selected but reticle active */}
+      {!pendingModelContext && ghostPosition && crystalUri && (
+        <ViroNode position={ghostPosition} opacity={0.65}>
+          <Viro3DObject
+            source={{ uri: crystalUri }}
+            position={[0, 0, 0]}
+            scale={[1, 1, 1]}
+            type="GLB"
+            materials={["xrayMaterial"]}
+          />
+        </ViroNode>
+      )}
       
       {placedObjects && placedObjects.map((obj: ARPlacedObject, i: number) => (
         <ARNodeComponent key={obj.id} obj={obj} index={i} setPlacedObjects={setPlacedObjects} arSceneRef={arSceneRef} />
       ))}
-
-      {/* 
-        LiDAR mesh visualization removed to prevent React Native bridge crashes.
-        Generating thousands of ViroBox/ViroGeometry instances dynamically causes 
-        immediate memory exhaustion. We now only fetch the data to prove connection 
-        and show the vertex count in the "WIRE Mesh" overlay.
-      */}
     </ViroARScene>
   );
 };
@@ -360,19 +411,36 @@ const ARScene = (props: any) => {
 export default function SandboxARScreen({ navigation }: any) {
   const insets = useSafeAreaInsets();
   
-  // Array of furniture pieces placed in the room
   const [placedObjects, setPlacedObjects] = useState<ARPlacedObject[]>([]);
-  
   const [planes, setPlanes] = useState<{[key: string]: any}>({});
   const [pendingModelContext, setPendingModelContext] = useState<(CatalogModel & { localUri: string }) | null>(null);
+  const [ghostPosition, setGhostPosition] = useState<[number, number, number] | null>(null);
   
   // Catalog Modal States
   const [isCatalogOpen, setIsCatalogOpen] = useState(false);
   const [catalogModels, setCatalogModels] = useState<CatalogModel[]>([]);
   const [loadingCatalog, setLoadingCatalog] = useState(false);
   const [downloadingModelId, setDownloadingModelId] = useState<string | null>(null);
+  const [crystalUri, setCrystalUri] = useState<string | null>(null);
+  
+  // Blink animation for PLACE button
+  const blinkAnim = useRef(new Animated.Value(1)).current;
 
-  // Fetch catalog from all companies to populate the Sandbox inventory
+  useEffect(() => {
+    if (pendingModelContext) {
+      const loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(blinkAnim, { toValue: 0.4, duration: 600, useNativeDriver: true }),
+          Animated.timing(blinkAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
+        ])
+      );
+      loop.start();
+      return () => loop.stop();
+    } else {
+      blinkAnim.setValue(1);
+    }
+  }, [pendingModelContext]);
+
   const fetchInventory = async () => {
     try {
       setLoadingCatalog(true);
@@ -393,13 +461,21 @@ export default function SandboxARScreen({ navigation }: any) {
 
   useEffect(() => {
     fetchInventory();
+    preloadCrystal();
   }, []);
 
-  // When user taps a catalog item, download it and prep it for dropping into the scene
+  const preloadCrystal = async () => {
+    try {
+      const asset = await Asset.fromModule(require('../../assets/models/crystal_pbr.glb')).downloadAsync();
+      setCrystalUri(asset.localUri || asset.uri);
+    } catch (err) {
+      console.log("Failed to preload crystal:", err);
+    }
+  };
+
   const handleSelectModelFromCatalog = async (model: CatalogModel) => {
     setDownloadingModelId(model.id);
     try {
-      // Securely request signed URL from Supabase
       const { data: signedData, error: signedError } = await supabase
         .storage
         .from('models_secure')
@@ -409,7 +485,6 @@ export default function SandboxARScreen({ navigation }: any) {
          throw new Error("Could not generate secure file URL");
       }
 
-      // Download model to local filesystem (ViroReact requires local files)
       const fileName = model.storage_path.split('/').pop() || 'model.glb';
       const localUri = `${FileSystem.documentDirectory}${fileName}`;
 
@@ -427,6 +502,7 @@ export default function SandboxARScreen({ navigation }: any) {
          ...model,
          localUri: `file://${finalUri}`
       });
+      setGhostPosition(null); // Reset ghost position
       
       setIsCatalogOpen(false);
     } catch (err) {
@@ -437,40 +513,68 @@ export default function SandboxARScreen({ navigation }: any) {
     }
   };
 
+  // Place the ghost model at its current position
+  const handlePlaceGhost = () => {
+    if (!pendingModelContext || !ghostPosition) return;
 
+    // IMPORTANT: Freeze position values immediately — ghostPosition state
+    // can change between now and next render, which would move placed model
+    const frozenX = ghostPosition[0];
+    const frozenY = ghostPosition[1];
+    const frozenZ = ghostPosition[2];
 
-  // UI Helpers
+    const scaleArgs = pendingModelContext.model_transform?.scale;
+    const parsedScale: [number, number, number] = scaleArgs ? [scaleArgs.x, scaleArgs.y, scaleArgs.z] : [1, 1, 1];
+    const rotArgs = pendingModelContext.model_transform?.rotation;
+    const parsedRotation: [number, number, number] = rotArgs ? [rotArgs.x, rotArgs.y, rotArgs.z] : [0, 0, 0];
+    const offsetArgs = pendingModelContext.model_transform?.modelOffset;
+    const parsedOffset: [number, number, number] = offsetArgs ? [offsetArgs.x, offsetArgs.y, offsetArgs.z] : [0, 0, 0];
+
+    const newObject: ARPlacedObject = {
+      id: Math.random().toString(36).substring(7),
+      title: pendingModelContext.title || 'Model',
+      localUri: pendingModelContext.localUri,
+      position: [frozenX, frozenY, frozenZ] as [number, number, number],
+      scale: parsedScale,
+      rotation: parsedRotation,
+      yOffset: 0,
+      modelOffset: parsedOffset,
+    };
+
+    // Add to placed objects FIRST, then reset ghost
+    setPlacedObjects(prev => {
+      const updated = [...prev, newObject];
+      return updated;
+    });
+    // Reset ghost position so it follows camera again for next placement
+    // Using setTimeout to ensure placedObjects state is committed first
+    setTimeout(() => setGhostPosition(null), 50);
+  };
+
   const formatSize = (meta: any) => meta?.file_size ? `${(meta.file_size / 1048576).toFixed(1)} MB` : 'N/A';
   const getThumbnailUrl = (path: string | null) => path ? `${process.env.EXPO_PUBLIC_SUPABASE_URL}/storage/v1/object/public/model_thumbnails/${path}` : null;
+
+  const hasPlacedAny = placedObjects.length > 0;
 
   return (
     <View style={styles.container}>
       <ViroARSceneNavigator 
         autofocus={true} 
-        // @ts-ignore - Viro types are outdated and expect () => Element, but it passes sceneNavigator props
+        // @ts-ignore
         initialScene={{ scene: ARScene }} 
         viroAppProps={{ 
            placedObjects, setPlacedObjects, 
            planes, setPlanes,
            pendingModelContext, setPendingModelContext,
+           ghostPosition, setGhostPosition,
+           onPlaceGhost: handlePlaceGhost,
+           crystalUri,
         }}
         style={styles.viroContainer} 
         occlusionMode="depthBased"
       />
 
-
-      {/* Tap-To-Place Prompt */}
-      {pendingModelContext && (
-         <View style={styles.promptOverlay}>
-            <Text style={styles.promptText}>Tap floor to place {pendingModelContext.title}</Text>
-            <TouchableOpacity 
-              onPress={() => setPendingModelContext(null)} 
-              style={{ marginLeft: 12, backgroundColor: 'rgba(255,60,60,0.8)', borderRadius: 14, width: 28, height: 28, alignItems: 'center', justifyContent: 'center' }}
-            >
-              <Text style={{ color: '#FFF', fontSize: 16, fontWeight: '700' }}>✕</Text>
-            </TouchableOpacity>
-         </View>
-      )}
+      {/* Crosshair removed — big 50cm reticle circle in AR scene is always visible */}
 
       {/* Top Header */}
       <View style={[styles.headerOverlay, { paddingTop: insets.top + spacing.sm }]}>
@@ -478,14 +582,60 @@ export default function SandboxARScreen({ navigation }: any) {
           <Text style={styles.backIcon}>←</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>Multi Models Viewer</Text>
+        {pendingModelContext && (
+          <View style={styles.ghostIndicator}>
+            <Text style={styles.ghostIndicatorText}>👻 {pendingModelContext.title}</Text>
+          </View>
+        )}
       </View>
-      {/* Bottom Floating Appended Action Area */}
+
+      {/* Bottom Action Area — always 2 buttons when model is loaded */}
       {!isCatalogOpen && (
         <View style={[styles.bottomOverlay, { paddingBottom: insets.bottom + spacing.lg }]}>
-           <TouchableOpacity style={styles.addButton} onPress={() => setIsCatalogOpen(true)}>
+          {pendingModelContext ? (
+            // Ghost active — CHANGE MODEL + PLACE MODEL / PLACE ANOTHER
+            <View style={styles.buttonRow}>
+              <TouchableOpacity 
+                style={[styles.secondaryButton]} 
+                onPress={() => {
+                  setPendingModelContext(null);
+                  setGhostPosition(null);
+                  setIsCatalogOpen(true);
+                }}
+              >
+                <Text style={styles.secondaryButtonText}>CHANGE{"\n"}MODEL</Text>
+              </TouchableOpacity>
+              
+              <Animated.View style={{ opacity: blinkAnim }}>
+                <TouchableOpacity 
+                  style={styles.placeButton} 
+                  onPress={handlePlaceGhost}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.placeButtonIcon}>⬇</Text>
+                  <Text style={styles.placeButtonText}>{hasPlacedAny ? 'PLACE ANOTHER' : 'PLACE MODEL'}</Text>
+                </TouchableOpacity>
+              </Animated.View>
+            </View>
+          ) : (
+            // No model selected — show ADD MODEL
+            <TouchableOpacity 
+              style={styles.addButton} 
+              onPress={() => setIsCatalogOpen(true)}
+            >
               <Text style={styles.addButtonIcon}>+</Text>
-              <Text style={styles.addButtonText}>ADD ITEM</Text>
-           </TouchableOpacity>
+              <Text style={styles.addButtonText}>{hasPlacedAny ? 'PLACE ANOTHER' : 'ADD MODEL'}</Text>
+            </TouchableOpacity>
+          )}
+          
+          {/* Instruction hint */}
+          {pendingModelContext ? (
+            <Text style={styles.hintText}>Move phone to position ghost • Tap PLACE to confirm</Text>
+          ) : hasPlacedAny ? (
+            <Text style={styles.hintText}>Drag to move • Pinch to scale • Twist to rotate</Text>
+          ) : (
+            <Text style={styles.hintText}>Select a 3D model from the catalog to begin</Text>
+          )}
         </View>
       )}
 
@@ -493,9 +643,9 @@ export default function SandboxARScreen({ navigation }: any) {
       <Modal visible={isCatalogOpen} animationType="slide" transparent={true}>
          <View style={[styles.modalContainer, { paddingTop: insets.top }]}>
            <View style={styles.modalHeader}>
-             <Text style={styles.modalTitle}>Sandbox Catalog</Text>
+             <Text style={styles.modalTitle}>Model Catalog</Text>
              <TouchableOpacity onPress={() => setIsCatalogOpen(false)} style={styles.modalCloseButton}>
-               <Text style={{ color: '#FFF' }}>Done</Text>
+               <Text style={{ color: '#FFF', fontSize: 15 }}>✕</Text>
              </TouchableOpacity>
            </View>
            
@@ -523,7 +673,7 @@ export default function SandboxARScreen({ navigation }: any) {
                    {downloadingModelId === item.id ? (
                       <ActivityIndicator color={colors.primary} />
                    ) : (
-                     <View style={styles.catalogAddIcon}><Text style={{color: '#FFF'}}>+</Text></View>
+                     <View style={styles.catalogAddIcon}><Text style={{color: '#FFF', fontSize: 16}}>+</Text></View>
                    )}
                  </TouchableOpacity>
                )}
@@ -545,18 +695,56 @@ const styles = StyleSheet.create({
   backButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center' },
   backIcon: { fontSize: 20, color: '#FFF' },
   headerTitle: { flex: 1, fontFamily: typography.fontFamily.semiBold, fontSize: typography.fontSize.lg, color: '#FFF' },
-  headerSubtitle: { fontFamily: typography.fontFamily.medium, fontSize: 12, color: colors.primary, marginTop: 2 },
-  clayButton: { paddingHorizontal: spacing.sm, paddingVertical: 6, borderRadius: borderRadius.sm, backgroundColor: 'rgba(0,0,0,0.6)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)' },
-  clayButtonActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  clayButtonText: { color: '#FFF', fontFamily: typography.fontFamily.bold, fontSize: 12, letterSpacing: 1 },
   
-  promptOverlay: { position: 'absolute', top: 120, left: spacing.md, right: spacing.md, alignItems: 'center', zIndex: 12, pointerEvents: 'none' },
-  promptText: { backgroundColor: 'rgba(0,0,0,0.8)', color: colors.primary, paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderRadius: 30, fontFamily: typography.fontFamily.semiBold, ...shadows.md, overflow: 'hidden'},
+  ghostIndicator: {
+    backgroundColor: 'rgba(0, 230, 255, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 230, 255, 0.4)',
+    borderRadius: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  ghostIndicatorText: {
+    color: '#00E6FF',
+    fontSize: 11,
+    fontFamily: typography.fontFamily.semiBold,
+  },
   
-  floatingHud: { position: 'absolute', left: spacing.md, right: spacing.md, backgroundColor: 'rgba(0,0,0,0.7)', padding: spacing.md, borderRadius: borderRadius.sm, zIndex: 10, borderWidth: 1, borderColor: colors.primary },
-  hudText: { color: colors.primary, fontFamily: typography.fontFamily.bold, fontSize: 12, marginBottom: 2, textAlign: 'center' },
+  crosshair: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    width: 40,
+    height: 40,
+    marginLeft: -20,
+    marginTop: -20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 5,
+  },
+  crosshairRing: {
+    position: 'absolute',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 2,
+    borderColor: 'rgba(0, 230, 255, 0.6)',
+  },
+  crosshairDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#00E6FF',
+  },
   
-  bottomOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, alignItems: 'center', zIndex: 10 },
+  bottomOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, alignItems: 'center', zIndex: 10, gap: 8 },
+  
+  buttonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  
   addButton: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: colors.primary,
     paddingHorizontal: spacing.xl, paddingVertical: spacing.md, borderRadius: 30, ...shadows.md,
@@ -564,26 +752,51 @@ const styles = StyleSheet.create({
   addButtonIcon: { color: '#000', fontSize: 24, marginRight: 8, fontWeight: 'bold' },
   addButtonText: { color: '#000', fontFamily: typography.fontFamily.bold, fontSize: 14, letterSpacing: 1 },
 
-  mapOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(10, 20, 30, 0.85)', zIndex: 4, justifyContent: 'center', alignItems: 'center' },
-  mapGrid: { width: 300, height: 400, borderWidth: 1, borderColor: 'rgba(0, 255, 255, 0.2)', backgroundColor: 'rgba(0, 255, 255, 0.05)', borderRadius: 8, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  mapUserDot: { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
-  mapUserDotInner: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#00FFFF', shadowColor: '#00FFFF', shadowRadius: 10, shadowOpacity: 0.8 },
-  mapUserText: { color: '#00FFFF', fontSize: 10, fontFamily: typography.fontFamily.bold, marginBottom: 4 },
-  mapObjectBox: { position: 'absolute', width: 10, height: 10, backgroundColor: colors.primary, borderRadius: 5, alignItems: 'center', justifyContent: 'center' },
-  mapObjectText: { position: 'absolute', top: -16, color: '#FFF', fontSize: 10, fontFamily: typography.fontFamily.bold, width: 80, textAlign: 'center' },
-  mapObjectSubtext: { position: 'absolute', top: -30, color: 'rgba(255,255,255,0.7)', fontSize: 9, width: 60, textAlign: 'center' },
+  placeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#00E6FF',
+    paddingHorizontal: 28,
+    paddingVertical: 14,
+    borderRadius: 30,
+    ...shadows.md,
+  },
+  placeButtonIcon: { fontSize: 18, marginRight: 8 },
+  placeButtonText: { color: '#000', fontFamily: typography.fontFamily.bold, fontSize: 15, letterSpacing: 1 },
+  
+  secondaryButton: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    alignItems: 'center',
+  },
+  secondaryButtonText: {
+    color: '#FFF',
+    fontFamily: typography.fontFamily.bold,
+    fontSize: 10,
+    letterSpacing: 1,
+    textAlign: 'center',
+    lineHeight: 14,
+  },
+  
+  hintText: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 11,
+    fontFamily: typography.fontFamily.medium,
+    textAlign: 'center',
+  },
 
   modalContainer: { flex: 1, backgroundColor: colors.surfaceElevated },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', padding: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border },
   modalTitle: { color: '#FFF', fontSize: 18, fontFamily: typography.fontFamily.bold },
-  modalCloseButton: { padding: 4 },
+  modalCloseButton: { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' },
   catalogCard: { flexDirection: 'row', backgroundColor: colors.surface, borderRadius: borderRadius.md, padding: spacing.sm, alignItems: 'center' },
   catalogImage: { width: 60, height: 60, borderRadius: borderRadius.sm, backgroundColor: 'rgba(255,255,255,0.05)' },
   catalogCardInfo: { flex: 1, marginLeft: spacing.md },
   catalogCardTitle: { color: '#FFF', fontFamily: typography.fontFamily.semiBold, fontSize: 14 },
   catalogCardSize: { color: colors.textTertiary, fontFamily: typography.fontFamily.medium, fontSize: 12, marginTop: 4 },
-  catalogAddIcon: { width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' },
-  
-  exportButton: { marginTop: spacing.lg, paddingVertical: spacing.md, paddingHorizontal: spacing.xl, backgroundColor: '#2196F3', borderRadius: borderRadius.md, ...shadows.md },
-  exportButtonText: { color: '#FFF', fontFamily: typography.fontFamily.bold, letterSpacing: 1 },
+  catalogAddIcon: { width: 34, height: 34, borderRadius: 17, backgroundColor: 'rgba(0,230,255,0.15)', borderWidth: 1, borderColor: 'rgba(0,230,255,0.3)', alignItems: 'center', justifyContent: 'center' },
 });

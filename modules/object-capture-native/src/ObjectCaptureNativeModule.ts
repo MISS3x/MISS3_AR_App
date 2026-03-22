@@ -9,6 +9,7 @@ declare class ObjectCaptureNativeModule extends NativeModule<ObjectCaptureNative
   startScanning(): Promise<StartScanningResult>;
   processModel(imageDir: string): Promise<ProcessModelResult>;
   cancelProcessing(): Promise<boolean>;
+  isSupported(): Promise<boolean>;
 }
 
 export default requireNativeModule<ObjectCaptureNativeModule>('ObjectCaptureNative');

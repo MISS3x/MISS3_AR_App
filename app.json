@@ -41,7 +41,7 @@
     },
     "extra": {
       "eas": {
-        "projectId": "781281a9-d60a-4dd8-85b8-980db8bb84cb"
+        "projectId": "b80f9f32-df51-4348-951f-27d6ce65d7f3"
       }
     },
     "plugins": [
@@ -53,8 +53,9 @@
           "androidXxrMode": "AR"
         }
       ],
-      "./plugins/withSceneReconstruction"
+      "./plugins/withSceneReconstruction",
+      "expo-asset"
     ],
-    "owner": "bonboniere3dx"
+    "owner": "radimx"
   }
 }

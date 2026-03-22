@@ -25,6 +25,10 @@ public class ARRulerNativeModule: Module {
         view.setShowWire(show: show)
       }
 
+      Prop("showRoomPlan") { (view: ARRulerNativeView, show: Bool) in
+        view.setShowRoomPlan(show: show)
+      }
+
       AsyncFunction("closeShape") { (view: ARRulerNativeView) -> [String: Any]? in
         return view.closeShape()
       }
@@ -127,6 +131,10 @@ public class ARRulerNativeModule: Module {
         return view.loadBoundingBoxes(boxes: boxes)
       }
 
+      AsyncFunction("loadRemoteObjects") { (view: ARRulerNativeView, objects: [[String: Any]]) -> Int in
+        return view.loadRemoteObjects(objects: objects)
+      }
+
       AsyncFunction("exportRoomPlanData") { (view: ARRulerNativeView) -> [String: Any] in
         return view.exportRoomPlanData()
       }
@@ -141,6 +149,10 @@ public class ARRulerNativeModule: Module {
 
       AsyncFunction("stopRoomScan") { (view: ARRulerNativeView) in
         view.stopRoomScan()
+      }
+
+      AsyncFunction("takePhoto") { (view: ARRulerNativeView, promise: Promise) in
+        view.takePhoto(promise: promise)
       }
     }
   }

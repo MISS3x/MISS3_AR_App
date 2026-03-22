@@ -9,4 +9,9 @@ export interface ARRulerNativeViewProps extends ViewProps {
   drawingMode?: 'floor' | 'free' | 'wall';
   /** Whether to show the mesh wireframe */
   showWire?: boolean;
+  /** Whether to show RoomPlan visualization (walls, doors, windows, objects) */
+  /** Whether to show RoomPlan visualization (walls, doors, windows, objects) */
+  showRoomPlan?: boolean;
+  /** Async command to load remote shapes */
+  loadRemoteObjects?: (objects: any[]) => Promise<number>;
 }

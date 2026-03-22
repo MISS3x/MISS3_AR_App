@@ -24,6 +24,7 @@ export default function ARRulerScreen({ navigation }: any) {
   const [drawingMode, setDrawingMode] = useState<'floor' | 'free' | 'wall'>('floor');
   const [shapeCount, setShapeCount] = useState(0);
   const [showWire, setShowWire] = useState(true);
+  const [showRoomPlan, setShowRoomPlan] = useState(true);
   
   // Auto-edge detection
   const [autoDetect, setAutoDetect] = useState(false);
@@ -42,7 +43,6 @@ export default function ARRulerScreen({ navigation }: any) {
   const [userProjects, setUserProjects] = useState<{ id: string, name: string }[]>([]);
   const [projectModalTab, setProjectModalTab] = useState<'new' | 'load'>('new');
   const [selectedLoadProjectId, setSelectedLoadProjectId] = useState<string | null>(null);
-  const [autoExportMesh, setAutoExportMesh] = useState<boolean>(true);
 
   // Auth
   const [userId, setUserId] = useState<string | null>(null);
@@ -62,6 +62,7 @@ export default function ARRulerScreen({ navigation }: any) {
   const [pendingCount, setPendingCount] = useState(0);
   const [uploadedCount, setUploadedCount] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [webOperatorOnline, setWebOperatorOnline] = useState(false);
 
   // Debug & Sync Controls
   const [chunkSizeMB, setChunkSizeMB] = useState(45); // 45MB Supabase limit
@@ -145,6 +146,103 @@ export default function ARRulerScreen({ navigation }: any) {
         .then(({ data }) => { if (data) setUserProjects(data); });
     }
   }, [showProjectModal, userId]);
+
+  // --- AR Collaboration Real-time Sync ---
+  const fetchRemoteData = async (projectId: string) => {
+    try {
+      const { data: modelsData } = await supabase
+        .from('ar_placed_models')
+        .select(`*, models_3d ( name )`)
+        .eq('project_id', projectId);
+
+      const { data: measurementsData } = await supabase
+        .from('ar_measurements')
+        .select('*')
+        .eq('project_id', projectId);
+
+      const allRemoteObjects: any[] = [];
+
+      if (modelsData) {
+        modelsData.forEach(d => {
+          allRemoteObjects.push({
+            type: 'model',
+            x: d.position_x ?? 0,
+            y: d.position_y ?? 0,
+            z: d.position_z ?? 0,
+            name: d.models_3d?.name ?? 'Model'
+          });
+        });
+      }
+
+      // Web draws shapes into ar_measurements — accept ANY type that has points
+      if (measurementsData) {
+        console.log(`[AR Collab] Got ${measurementsData.length} measurements from web`);
+        measurementsData.forEach(d => {
+          const pType = d.payload?.type;
+          const pts = d.payload?.points;
+          if (pts && Array.isArray(pts) && pts.length >= 2) {
+            // Map any type to polygon/polyline for native rendering
+            const renderType = (pType === 'polygon' || pType === 'floor' || pType === 'wall') ? 'polygon' : 'polyline';
+            allRemoteObjects.push({
+              type: renderType,
+              points: pts,
+              extrusionHeight: d.payload.extrusionHeight || 0
+            });
+          }
+        });
+      }
+      
+      console.log(`[AR Collab] Sending ${allRemoteObjects.length} remote objects to native`);
+      rulerRef.current?.loadRemoteObjects?.(allRemoteObjects);
+
+      // Also load bounding boxes (RoomPlan gizmos) for the project
+      const { data: boxes } = await supabase
+        .from('ar_bounding_boxes')
+        .select('*')
+        .eq('project_id', projectId);
+      if (boxes && boxes.length > 0) {
+        rulerRef.current?.loadBoundingBoxes?.(boxes);
+        console.log(`[AR Collab] Loaded ${boxes.length} bounding boxes`);
+      }
+    } catch (e) {
+      console.warn("Error fetching remote data:", e);
+    }
+  };
+
+  useEffect(() => {
+    if (projectData?.id) {
+      // 🟢 AR Collaboration: Listen for remote additions from the web operator
+      fetchRemoteData(projectData.id);
+
+      const sub = supabase.channel(`collab_${projectData.id}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'ar_measurements', filter: `project_id=eq.${projectData.id}` }, () => fetchRemoteData(projectData.id))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'ar_placed_models', filter: `project_id=eq.${projectData.id}` }, () => fetchRemoteData(projectData.id))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'ar_bounding_boxes', filter: `project_id=eq.${projectData.id}` }, () => fetchRemoteData(projectData.id))
+        .on('presence', { event: 'sync' }, () => {
+          const newState = sub.presenceState()
+          let isWebOnline = false
+          for (const key in newState) {
+            const presences = newState[key] as any[]
+            if (presences.some(p => p.client === 'web')) {
+              isWebOnline = true
+              break
+            }
+          }
+          setWebOperatorOnline(isWebOnline)
+        })
+        .subscribe(async (status) => {
+           if (status === 'SUBSCRIBED') {
+              addLog(`🟢 AR Collab Sync Active (Web Data + Bounding Boxes)`);
+              await sub.track({ online_at: new Date().toISOString(), client: 'ios' })
+           }
+        });
+
+      return () => {
+        supabase.removeChannel(sub);
+      };
+    }
+  }, [projectData?.id]);
+
   const handleCreateProject = async () => {
     if (projectModalTab === 'new') {
       if (!projectNameInput.trim()) {
@@ -528,9 +626,13 @@ export default function ARRulerScreen({ navigation }: any) {
         await supabase.from('ar_bounding_boxes').upsert(payload, { onConflict: 'id' });
       }
       
-      if (cadData.planes) {
+      if (cadData.planes || cadData.trajectory) {
+        const updatePayload: any = {};
+        if (cadData.planes) updatePayload.ar_anchors_json = cadData.planes;
+        if (cadData.trajectory) updatePayload.camera_trajectory = cadData.trajectory;
+        
         await supabase.from('ar_projects')
-          .update({ ar_anchors_json: cadData.planes })
+          .update(updatePayload)
           .eq('id', projectData.id);
       }
     } catch (e) {
@@ -599,8 +701,12 @@ export default function ARRulerScreen({ navigation }: any) {
 
   // --- Room Scan Start/Stop Handlers ---
   const handleStartRoomScan = async () => {
-    if (!userId || !projectData) {
-      Alert.alert('Login Required', 'Sign in and create a project first.');
+    if (!userId) {
+      Alert.alert('Login Required', 'Sign in to use RoomPlan.');
+      return;
+    }
+    if (!projectData) {
+      setShowProjectModal(true);
       return;
     }
     try {
@@ -617,19 +723,18 @@ export default function ARRulerScreen({ navigation }: any) {
     try {
       setIsRoomScanning(false);
       setIsRoomFinalizing(true);
-      setPrompt('⏳ Stopping scan & finalizing room plan...');
+      setPrompt('⏳ Exporting mesh before stopping scan...');
       addLogB('🛑 Stopping room scan...');
       
-      // 1. Stop RoomCaptureSession (triggers RoomBuilder finalization on Swift side)
+      
+      // Note: mesh export was removed in previous refactor — skip directly to stopping session
+      // 2. Stop RoomCaptureSession (triggers RoomBuilder finalization on Swift side)
+      addLogB('🛑 Stopping RoomCaptureSession...');
       await rulerRef.current?.stopRoomScan();
       
-      // 2. Wait for RoomBuilder ML finalization
+      // 3. Wait for RoomBuilder ML finalization
       addLogB('🧠 RoomBuilder ML finalization in progress...');
       await new Promise(r => setTimeout(r, 4000));
-      
-      // 3. Auto-export mesh chunks (45MB max)
-      addLogMesh('📤 Auto-exporting mesh...');
-      await handleExportMesh();
       
       // 4. Sync final RoomPlan data immediately
       const roomData = await rulerRef.current?.exportRoomPlanData();
@@ -871,6 +976,45 @@ export default function ARRulerScreen({ navigation }: any) {
     }
   };
 
+  const handleTakePhoto = async () => {
+    if (!userId || !projectData) {
+      Alert.alert("Login Required", "Sign in to take photos.");
+      return;
+    }
+    try {
+      setPrompt("Capturing photo...");
+      const result = await rulerRef.current?.takePhoto();
+      if (!result || !result.uri || !result.transform) {
+        throw new Error("No photo captured");
+      }
+      
+      const fileName = `${userId}/${projectData.id}_${Date.now()}.jpg`;
+      const formData = new FormData();
+      formData.append('file', { uri: result.uri, name: 'photo.jpg', type: 'image/jpeg' } as any);
+      
+      const { error: uploadErr } = await supabase.storage.from('ar-photos').upload(fileName, formData);
+      if (uploadErr) throw uploadErr;
+      
+      const { data: publicUrlData } = supabase.storage.from('ar-photos').getPublicUrl(fileName);
+      
+      const photoId = `photo_${Date.now()}`;
+      await supabase.from('ar_photos').insert({
+        id: photoId,
+        project_id: projectData.id,
+        user_id: userId,
+        file_path: fileName,
+        public_url: publicUrlData.publicUrl,
+        transform: result.transform
+      });
+      
+      setPrompt("📷 Photo saved to map!");
+    } catch (e: any) {
+      console.log("Photo error:", e);
+      Alert.alert("Photo Error", e.message || "Failed to capture photo");
+      setPrompt("Photo capture failed.");
+    }
+  };
+
   return (
     <View style={styles.container}>
       <ARRulerNativeView 
@@ -881,6 +1025,7 @@ export default function ARRulerScreen({ navigation }: any) {
         drawingMode={drawingMode}
         meshColor="#00FF66"
         showWire={showWire}
+        showRoomPlan={showRoomPlan}
       />
       
       {/* Header */}
@@ -888,15 +1033,41 @@ export default function ARRulerScreen({ navigation }: any) {
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Text style={styles.backIcon}>←</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle} numberOfLines={1}>
-          {projectData ? projectData.name : 'AR Ruler'}
-        </Text>
-        <TouchableOpacity style={styles.actionButton} onPress={handleUndo}>
-          <Text style={styles.actionButtonText}>UNDO</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.actionButton} onPress={handleReset}>
-           <Text style={styles.actionButtonText}>RESET</Text>
-        </TouchableOpacity>
+        
+        <View style={{ flex: 1, paddingLeft: 8 }}>
+          <Text style={styles.headerTitle} numberOfLines={1}>
+            {projectData ? projectData.name : 'AR Ruler'}
+          </Text>
+          {projectData && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 3 }}>
+              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: webOperatorOnline ? '#4CAF50' : '#F44336', marginRight: 6, shadowColor: webOperatorOnline ? '#4CAF50' : '#F44336', shadowOpacity: 0.8, shadowRadius: 4, shadowOffset: { width: 0, height: 0 } }} />
+              <Text style={{ color: webOperatorOnline ? '#4CAF50' : '#F44336', fontSize: 10, fontWeight: 'bold' }}>
+                {webOperatorOnline ? 'WEB OPERATOR ONLINE' : 'WEB OFFLINE'}
+              </Text>
+            </View>
+          )}
+        </View>
+        {/* Top Right Controls — LOGOUT + DELETE ALL */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          {userId && (
+            <TouchableOpacity 
+              style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' }}
+              onPress={async () => { await supabase.auth.signOut(); setUserId(null); setProjectData(null); }}
+            >
+              <Text style={{ color: '#FFF', fontSize: 10, fontWeight: 'bold' }}>LOGOUT</Text>
+            </TouchableOpacity>
+          )}
+
+          {shapeCount > 0 && (
+            <TouchableOpacity 
+              style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#FF1744', borderWidth: 2, borderColor: '#FF1744', alignItems: 'center', justifyContent: 'center' }}
+              onPress={handleReset}
+              activeOpacity={0.7}
+            >
+               <Text style={{ color: '#FFF', fontSize: 20, fontWeight: 'bold', lineHeight: 22, marginTop: -2 }}>✕</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
       {/* Compact status bar — login + HIDE toggle on one line */}
@@ -914,21 +1085,38 @@ export default function ARRulerScreen({ navigation }: any) {
       
 
 
-      {/* Tool buttons — right side: WIRE + START SCAN (mirror of left FLOOR/FREE/WALL) */}
-      <View style={{ position: 'absolute', right: 12, bottom: insets.bottom + 100, zIndex: 15, gap: 6 }} pointerEvents="box-none">
+      {/* Tool buttons — right side: DELETE ALL + WIRE + ROOM + SCAN */}
+      <View style={{ position: 'absolute', right: 12, bottom: insets.bottom + 20, zIndex: 15, gap: 6, alignItems: 'center' }} pointerEvents="box-none">
+         
          <TouchableOpacity 
-           style={[styles.modeButton, showWire && { ...styles.modeButtonActive, borderColor: tronBlue, backgroundColor: 'rgba(51,204,255,0.15)' }]}
-           onPress={() => setShowWire(!showWire)}
+           style={[styles.circleBtn, { borderColor: '#E0E0E0', backgroundColor: '#E0E0E0' }]}
+           onPress={handleTakePhoto}
            activeOpacity={0.7}
          >
-            <Text style={[styles.modeButtonText, showWire && { color: tronBlue }]}>WIRE</Text>
+            <Text style={[styles.circleBtnText, { color: '#000', fontSize: 24, marginTop: -4 }]}>📷</Text>
          </TouchableOpacity>
 
          <TouchableOpacity 
-           style={[styles.modeButton, 
-             isRoomScanning ? { ...styles.modeButtonActive, borderColor: '#FF1744', backgroundColor: 'rgba(255,23,68,0.2)' } :
-             isRoomFinalizing ? { ...styles.modeButtonActive, borderColor: '#FFD600', backgroundColor: 'rgba(255,214,0,0.15)' } :
-             { borderColor: '#4CAF50' }
+           style={[styles.circleBtn, showWire && { borderColor: tronBlue, backgroundColor: tronBlue }]}
+           onPress={() => setShowWire(!showWire)}
+           activeOpacity={0.7}
+         >
+            <Text style={[styles.circleBtnText, showWire && { color: '#000' }]}>WIRE</Text>
+         </TouchableOpacity>
+
+         <TouchableOpacity 
+           style={[styles.circleBtn, showRoomPlan && { borderColor: '#AB47BC', backgroundColor: '#AB47BC' }]}
+           onPress={() => setShowRoomPlan(!showRoomPlan)}
+           activeOpacity={0.7}
+         >
+            <Text style={[styles.circleBtnText, showRoomPlan && { color: '#FFF' }]}>ROOM</Text>
+         </TouchableOpacity>
+
+         <TouchableOpacity 
+           style={[styles.circleBtn, 
+             isRoomScanning ? { borderColor: '#FF1744', backgroundColor: '#FF1744' } :
+             isRoomFinalizing ? { borderColor: '#FFD600', backgroundColor: '#FFD600' } :
+             { borderColor: '#4CAF50', backgroundColor: '#222' }
            ]}
            onPress={isRoomScanning ? handleStopRoomScan : handleStartRoomScan}
            disabled={isRoomFinalizing}
@@ -936,13 +1124,12 @@ export default function ARRulerScreen({ navigation }: any) {
          >
             {isRoomFinalizing ? (
               <>
-                <ActivityIndicator size="small" color="#FFD600" />
-                <Text style={[styles.modeButtonText, { color: '#FFD600', fontSize: 9 }]}>WAIT</Text>
+                <ActivityIndicator size="small" color="#000" />
               </>
             ) : isRoomScanning ? (
-              <Text style={[styles.modeButtonText, { color: '#FF1744' }]}>STOP{"\n"}SCAN</Text>
+              <Text style={[styles.circleBtnText, { color: '#FFF' }]}>STOP</Text>
             ) : (
-              <Text style={[styles.modeButtonText, { color: '#4CAF50' }]}>SCAN{"\n"}ROOM</Text>
+              <Text style={[styles.circleBtnText, { color: '#4CAF50' }]}>SCAN</Text>
             )}
          </TouchableOpacity>
       </View>
@@ -1025,92 +1212,101 @@ export default function ARRulerScreen({ navigation }: any) {
         </View>
       )}
 
-      {/* Mode buttons — left side vertical */}
-      <View style={{ position: 'absolute', left: 12, bottom: insets.bottom + 100, zIndex: 15, gap: 6 }} pointerEvents="box-none">
+      {/* Mode button — left side, cyclic button + context buttons above */}
+      <View style={{ position: 'absolute', left: 12, bottom: insets.bottom + 20, zIndex: 15, gap: 6, alignItems: 'center' }} pointerEvents="box-none">
+         {/* CLOSE / SAVE OPEN — shown when enough points, same circle size */}
+         {pointCount >= 3 && (
+           <>
+             <TouchableOpacity 
+               style={[styles.circleBtn, { borderColor: tronBlue, backgroundColor: tronBlue }]}
+               onPress={handleCloseShape}
+               activeOpacity={0.7}
+             >
+               <Text style={[styles.circleBtnText, { color: '#000', fontSize: 9 }]}>CLOSE</Text>
+             </TouchableOpacity>
+             <TouchableOpacity 
+               style={[styles.circleBtn, { borderColor: '#FFD700', backgroundColor: '#FFD700' }]}
+               onPress={handleSaveOpenShape}
+               activeOpacity={0.7}
+             >
+               <Text style={[styles.circleBtnText, { color: '#000', fontSize: 8 }]}>SAVE{"\n"}OPEN</Text>
+             </TouchableOpacity>
+           </>
+         )}
+         {pointCount === 2 && (
+           <TouchableOpacity 
+             style={[styles.circleBtn, { borderColor: '#FFD700', backgroundColor: '#FFD700' }]}
+             onPress={handleSaveOpenShape}
+             activeOpacity={0.7}
+           >
+             <Text style={[styles.circleBtnText, { color: '#000', fontSize: 8 }]}>SAVE{"\n"}LINE</Text>
+           </TouchableOpacity>
+         )}
+
+         {/* Cyclic mode button — FLOOR → WALL → FREE, fully colored */}
          <TouchableOpacity 
-           style={[styles.modeButton, drawingMode === 'floor' && styles.modeButtonActive]} 
-           onPress={() => { setDrawingMode('floor'); setPrompt(floorDetected ? 'Floor mode — locked Y' : 'Move phone to scan floor...'); }}
+           style={[styles.circleBtn, {
+             borderColor: drawingMode === 'free' ? freeOrange : drawingMode === 'wall' ? wallPink : tronBlue,
+             backgroundColor: drawingMode === 'free' ? freeOrange : drawingMode === 'wall' ? wallPink : tronBlue,
+           }]}
+           onPress={() => {
+             const modes: Array<'floor' | 'wall' | 'free'> = ['floor', 'wall', 'free'];
+             const idx = modes.indexOf(drawingMode);
+             const next = modes[(idx + 1) % modes.length];
+             setDrawingMode(next);
+           }}
            activeOpacity={0.7}
          >
-            <Text style={[styles.modeButtonText, drawingMode === 'floor' && { color: tronBlue }]}>FLOOR</Text>
+            <Text style={[styles.circleBtnText, { color: '#000', fontWeight: 'bold' }]}>
+              {drawingMode.toUpperCase()}
+            </Text>
          </TouchableOpacity>
-
-         <TouchableOpacity 
-           style={[styles.modeButton, drawingMode === 'free' && { ...styles.modeButtonActive, borderColor: freeOrange, backgroundColor: 'rgba(255,152,0,0.15)' }]} 
-           onPress={() => { setDrawingMode('free'); setPrompt('Free mode — any surface'); }}
-           activeOpacity={0.7}
-         >
-            <Text style={[styles.modeButtonText, drawingMode === 'free' && { color: freeOrange }]}>FREE</Text>
-         </TouchableOpacity>
-
-         <TouchableOpacity 
-           style={[styles.modeButton, drawingMode === 'wall' && { ...styles.modeButtonActive, borderColor: wallPink, backgroundColor: 'rgba(255,77,153,0.15)' }]} 
-           onPress={() => { setDrawingMode('wall'); setPrompt('Wall mode — vertical surfaces'); }}
-           activeOpacity={0.7}
-         >
-            <Text style={[styles.modeButtonText, drawingMode === 'wall' && { color: wallPink }]}>WALL</Text>
-         </TouchableOpacity>
-
       </View>
 
       {/* + Add point — center bottom */}
-      <View style={{ position: 'absolute', bottom: insets.bottom + 100, left: 0, right: 0, alignItems: 'center', zIndex: 15 }} pointerEvents="box-none">
-         <TouchableOpacity style={[styles.addPointButton, { borderColor: drawingMode === 'free' ? freeOrange : drawingMode === 'wall' ? wallPink : tronBlue }]} onPress={handleAddPoint} activeOpacity={0.7}>
-            <Text style={[styles.addPointText, { color: drawingMode === 'free' ? freeOrange : drawingMode === 'wall' ? wallPink : tronBlue }]}>+</Text>
-         </TouchableOpacity>
-      </View>
-      
+      <View style={{ position: 'absolute', bottom: insets.bottom + 20, left: 0, right: 0, alignItems: 'center', zIndex: 15 }} pointerEvents="box-none">
+         {/* Hint text above buttons */}
+         <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 10, marginBottom: 6, fontWeight: '500' }}>
+           {pointCount === 0 ? (floorDetected || drawingMode !== 'floor' ? 'Tap + to add first corner' : 'Scanning floor...') :
+            pointCount < 3 ? `${pointCount} pts — tap more corners` :
+            `${pointCount} pts — CLOSE or SAVE OPEN`}
+         </Text>
 
-
-      {/* Bottom */}
-      <View style={[styles.bottomPanel, { paddingBottom: insets.bottom + spacing.lg }]}>
-         {/* Prompt / Message row */}
-         <View style={{ flex: 1, paddingHorizontal: spacing.sm, justifyContent: 'center' }}>
-            <Text style={[styles.promptText, { color: floorDetected || drawingMode !== 'floor' ? tronBlue : '#FFD700', fontSize: 11, textAlign: 'center' }]} numberOfLines={2}>
-              {prompt}
-            </Text>
-         </View>
-         {pointCount >= 3 ? (
-             <View style={{ flexDirection: 'row', flex: 1, gap: 6, marginHorizontal: spacing.sm, alignItems: 'center' }}>
-               <TouchableOpacity 
-                  style={[styles.exportButton, { flex: 1, backgroundColor: tronBlue }]}
-                  onPress={handleCloseShape}
-               >
-                  <Text style={[styles.actionButtonText, { color: '#000' }]}>CLOSE</Text>
-               </TouchableOpacity>
-               <TouchableOpacity 
-                  style={[styles.exportButton, { flex: 1, backgroundColor: '#FFD700' }]}
-                  onPress={handleSaveOpenShape}
-               >
-                  <Text style={[styles.actionButtonText, { color: '#000' }]}>SAVE OPEN</Text>
-               </TouchableOpacity>
-             </View>
-         ) : pointCount === 2 ? (
-             <TouchableOpacity 
-                style={[styles.exportButton, { flex: 1, marginHorizontal: spacing.md, backgroundColor: '#FFD700' }]}
-                onPress={handleSaveOpenShape}
-             >
-                <Text style={[styles.actionButtonText, { color: '#000' }]}>SAVE LINE</Text>
-             </TouchableOpacity>
-         ) : (
-             <View style={styles.measureBox}>
-                 <Text style={styles.measureValue}>{pointCount}<Text style={styles.measureUnit}> pts</Text></Text>
-                 <Text style={styles.measureLabel}>Corners</Text>
-             </View>
+         {/* UNDO circle above + button — only when drawing (pointCount > 0) */}
+         {pointCount > 0 && (
+           <TouchableOpacity 
+             style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#333', borderWidth: 2, borderColor: '#555', alignItems: 'center', justifyContent: 'center', marginBottom: 8 }}
+             onPress={handleUndo}
+             activeOpacity={0.7}
+           >
+             <Text style={{ color: '#FFF', fontSize: 20 }}>↩</Text>
+           </TouchableOpacity>
          )}
-         <View style={styles.measureDivider} />
+
+         {/* + button — same 56px circle */}
+         <TouchableOpacity 
+           style={[styles.circleBtn, { 
+             width: 64, height: 64, borderRadius: 32,
+             borderColor: drawingMode === 'free' ? freeOrange : drawingMode === 'wall' ? wallPink : tronBlue,
+             backgroundColor: drawingMode === 'free' ? freeOrange : drawingMode === 'wall' ? wallPink : tronBlue,
+           }]} 
+           onPress={handleAddPoint} 
+           activeOpacity={0.7}
+         >
+            <Text style={{ color: '#000', fontSize: 36, lineHeight: 40, fontWeight: '300', marginTop: -2 }}>+</Text>
+         </TouchableOpacity>
       </View>
 
       {/* ===== SYNC LOG — full-width, collapsible ===== */}
       {!showDebugPanel && (
-        <View style={{ position: 'absolute', left: 12, right: 12, top: insets.top + 62, zIndex: 98, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, flexDirection: 'row', gap: 8 }}>
+        <View style={{ position: 'absolute', left: 12, right: 12, top: insets.top + 90, zIndex: 98, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, flexDirection: 'row', gap: 8 }}>
           {logsM.length > 0 && <Text style={{ color: '#33CCFF', fontSize: 7, fontFamily: 'monospace', flex: 1 }} numberOfLines={1}>📐 {logsM[0]?.replace(/\[.*?\]\s*/, '')}</Text>}
           {logsB.length > 0 && <Text style={{ color: '#4CAF50', fontSize: 7, fontFamily: 'monospace', flex: 1 }} numberOfLines={1}>🏠 {logsB[0]?.replace(/\[.*?\]\s*/, '')}</Text>}
         </View>
       )}
 
       {showDebugPanel && (
-        <ScrollView style={{ position: 'absolute', left: 12, right: 12, top: insets.top + 62, maxHeight: 380, backgroundColor: 'rgba(0,0,0,0.85)', borderRadius: 10, padding: 8, zIndex: 99, borderWidth: 1, borderColor: 'rgba(0,255,100,0.2)' }}>
+        <ScrollView style={{ position: 'absolute', left: 12, right: 12, top: insets.top + 90, maxHeight: 380, backgroundColor: 'rgba(0,0,0,0.85)', borderRadius: 10, padding: 8, zIndex: 99, borderWidth: 1, borderColor: 'rgba(0,255,100,0.2)' }}>
           
           {/* 1. MEASUREMENTS */}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 3 }}>
@@ -1257,20 +1453,6 @@ export default function ARRulerScreen({ navigation }: any) {
               </View>
             )}
 
-            {/* AUTO-EXPORT TOGGLE */}
-            <View style={styles.toggleContainer}>
-              <View style={{ flex: 1, paddingRight: 10 }}>
-                <Text style={styles.toggleTitle}>Auto-Export Mesh Chunking</Text>
-                <Text style={styles.toggleDesc}>Silently slices and uploads 45MB chunks of 3D data while scanning.</Text>
-              </View>
-              <Switch
-                value={autoExportMesh}
-                onValueChange={setAutoExportMesh}
-                trackColor={{ false: '#333', true: 'rgba(51,204,255,0.5)' }}
-                thumbColor={autoExportMesh ? '#33CCFF' : '#888'}
-              />
-            </View>
-
             <View style={styles.modalButtons}>
               <TouchableOpacity style={styles.modalBtnSkip} onPress={handleSkipProject}>
                 <Text style={styles.modalBtnSkipText}>Free Mode</Text>
@@ -1324,14 +1506,17 @@ const styles = StyleSheet.create({
   wireToggle: { position: 'absolute', right: 12, top: '45%', backgroundColor: 'rgba(0,0,0,0.6)', borderWidth: 2, borderColor: 'rgba(255,255,255,0.2)', borderRadius: 14, paddingHorizontal: 10, paddingVertical: 12, zIndex: 25, alignItems: 'center' },
   wireToggleActive: { borderColor: '#33CCFF', backgroundColor: 'rgba(51,204,255,0.15)' },
   wireToggleText: { color: '#666', fontFamily: typography.fontFamily.bold, fontSize: 11, letterSpacing: 1, textAlign: 'center' },
-  modeButton: { paddingHorizontal: 24, paddingVertical: 18, borderRadius: 28, backgroundColor: 'rgba(0,0,0,0.6)', borderWidth: 2, borderColor: 'rgba(255,255,255,0.2)', minWidth: 90, alignItems: 'center' },
+  modeButton: { width: 56, height: 56, borderRadius: 28, backgroundColor: 'rgba(0,0,0,0.6)', borderWidth: 2, borderColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' },
   modeButtonActive: { borderColor: '#33CCFF', backgroundColor: 'rgba(51,204,255,0.2)' },
-  modeButtonText: { color: '#666', fontFamily: typography.fontFamily.bold, fontSize: 15, letterSpacing: 1.5 },
-  addPointButton: { width: 72, height: 72, borderRadius: 36, backgroundColor: 'rgba(51,204,255,0.1)', borderWidth: 3, alignItems: 'center', justifyContent: 'center', ...shadows.lg },
-  addPointText: { fontSize: 42, lineHeight: 46, fontWeight: '300', marginTop: -2 },
+  modeButtonText: { color: '#666', fontFamily: typography.fontFamily.bold, fontSize: 10, letterSpacing: 1, textAlign: 'center' },
+  // Unified circle button — all buttons same size
+  circleBtn: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#222', borderWidth: 2, borderColor: '#555', alignItems: 'center', justifyContent: 'center' },
+  circleBtnText: { color: '#666', fontFamily: typography.fontFamily.bold, fontSize: 11, letterSpacing: 1, textAlign: 'center' },
+  addPointButton: { width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(0,0,0,0.4)', borderWidth: 3, alignItems: 'center', justifyContent: 'center', ...shadows.lg },
+  addPointText: { fontSize: 36, lineHeight: 40, fontWeight: '300', marginTop: -2 },
 
   // Modals
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', alignItems: 'center' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'flex-start', paddingTop: 120, alignItems: 'center' },
   modalContent: { backgroundColor: '#111827', borderRadius: 16, padding: 24, width: '85%', borderWidth: 1, borderColor: 'rgba(51,204,255,0.3)' },
   modalTitle: { color: '#FFF', fontSize: 20, fontFamily: typography.fontFamily.bold, marginBottom: 6 },
   modalSubtitle: { color: 'rgba(255,255,255,0.5)', fontSize: 13, marginBottom: 16, lineHeight: 18 },

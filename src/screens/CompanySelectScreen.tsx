@@ -250,6 +250,7 @@ export default function CompanySelectScreen({ navigation }: CompanySelectScreenP
             </View>
           </LinearGradient>
         </TouchableOpacity>
+
       </View>
 
       <View style={styles.sectionDivider} />

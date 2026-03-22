@@ -61,6 +61,10 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   private var currentPolygon: [SCNVector3] = []
   private var closedShapes: [[String: Any]] = []
   
+  // Camera Trajectory
+  private var cameraTrajectory: [[String: Float]] = []
+  private var lastTrajectoryTime: TimeInterval = 0
+
   // RoomPlan (iOS 16+)
   private var roomPlanController: Any?
 
@@ -68,6 +72,7 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   private var pointNodes: [SCNNode] = []
   private var lineNodes: [SCNNode] = []
   private var labels: [SCNNode] = []
+  private var remoteObjectNodes: [SCNNode] = []
   
   // Ghost preview line (from last point to cursor)
   private var ghostLineNode: SCNNode?
@@ -285,6 +290,16 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   
   private func updatePointer(frame: ARFrame) {
     let screenCenter = CGPoint(x: bounds.midX, y: bounds.midY)
+    
+    // Track trajectory (every 0.5 seconds)
+    if frame.timestamp - lastTrajectoryTime > 0.5 {
+      lastTrajectoryTime = frame.timestamp
+      let t = frame.camera.transform
+      let point: [String: Float] = [
+        "x": t.columns.3.x, "y": t.columns.3.y, "z": t.columns.3.z
+      ]
+      cameraTrajectory.append(point)
+    }
     
     let cameraPos = SCNVector3(frame.camera.transform.columns.3.x,
                                frame.camera.transform.columns.3.y,
@@ -817,6 +832,24 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
     }
   }
 
+  // MARK: - RoomPlan Toggle
+  private var roomPlanVisible: Bool = true
+  
+  func setShowRoomPlan(show: Bool) {
+    roomPlanVisible = show
+    if #available(iOS 16.0, *) {
+        if let rpc = roomPlanController as? RoomPlanController {
+            rpc.setVisible(show)
+        }
+    }
+    // Also toggle loaded bounding box gizmos (from Supabase)
+    arView.scene.rootNode.enumerateChildNodes { node, _ in
+      if node.name?.hasPrefix("gizmo_") == true {
+        node.isHidden = !show
+      }
+    }
+  }
+
   // MARK: - Mesh Export (OBJ)
   @available(iOS 13.4, *)
   func exportMesh() -> [String: Any] {
@@ -1136,7 +1169,8 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
     
     return [
       "planes": planes,
-      "bounding_boxes": boundingBoxes
+      "bounding_boxes": boundingBoxes,
+      "trajectory": cameraTrajectory
     ]
   }
 
@@ -1219,6 +1253,14 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
         if let rpc = roomPlanController as? RoomPlanController {
             rpc.stop()
             print("[RoomPlan] User stopped room scan — finalization will auto-trigger")
+            
+            // Resume ARWorldTracking to prevent the camera from freezing
+            let configuration = ARWorldTrackingConfiguration()
+            configuration.planeDetection = [.horizontal, .vertical]
+            if #available(iOS 13.4, *), ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) {
+                configuration.sceneReconstruction = .mesh
+            }
+            arView.session.run(configuration)
         }
     }
   }
@@ -1259,6 +1301,40 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
         drawLine(from: positions.last!, to: positions.first!, color: color)
       }
       
+      // Extrusion for 3D walls
+      if let extrudeH = payload["extrusionHeight"] as? Double, extrudeH > 0 {
+        let wallHeight = Float(extrudeH)
+        let wallColor = color.withAlphaComponent(0.6)
+        
+        func buildWall(p1: SCNVector3, p2: SCNVector3) {
+            let dx = p2.x - p1.x
+            let dz = p2.z - p1.z
+            let length = sqrt(dx*dx + dz*dz)
+            guard length > 0.001 else { return }
+            
+            let box = SCNBox(width: CGFloat(length), height: CGFloat(wallHeight), length: 0.02, chamferRadius: 0)
+            box.firstMaterial?.diffuse.contents = wallColor
+            box.firstMaterial?.isDoubleSided = true
+            box.firstMaterial?.lightingModel = .lambert
+            
+            let node = SCNNode(geometry: box)
+            // Midpoint
+            node.position = SCNVector3((p1.x + p2.x)/2, p1.y + wallHeight/2, (p1.z + p2.z)/2)
+            // Rotation (yaw)
+            node.eulerAngles.y = atan2(dx, dz) - Float.pi / 2
+            
+            arView.scene.rootNode.addChildNode(node)
+            // Add to a collection if needed, or just let them be child nodes.
+        }
+        
+        for i in 1..<positions.count {
+            buildWall(p1: positions[i-1], p2: positions[i])
+        }
+        if positions.count >= 3 && (shapeType == "floor" || shapeType == "wall") {
+            buildWall(p1: positions.last!, p2: positions.first!)
+        }
+      }
+      
       // Draw area/length label at centroid
       if let area = payload["area"] as? Double, positions.count > 0 {
         let cx = positions.reduce(Float(0)) { $0 + $1.x } / Float(positions.count)
@@ -1270,6 +1346,46 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
       count += 1
     }
     return count
+    return count
+  }
+  
+  // MARK: - Helper: Thick Wireframe Box
+  func createThickWireframeBox(width w: Float, height h: Float, length d: Float, thickness: Float, color: UIColor) -> SCNNode {
+      let root = SCNNode()
+      let hw = w / 2
+      let hh = h / 2
+      let hd = d / 2
+      let t = CGFloat(thickness)
+      
+      func addBoxEdge(w2: Float, h2: Float, d2: Float, x: Float, y: Float, z: Float) {
+          let boxGeo = SCNBox(width: CGFloat(w2), height: CGFloat(h2), length: CGFloat(d2), chamferRadius: 0)
+          boxGeo.firstMaterial?.diffuse.contents = color
+          boxGeo.firstMaterial?.lightingModel = .constant
+          boxGeo.firstMaterial?.readsFromDepthBuffer = false
+          let node = SCNNode(geometry: boxGeo)
+          node.position = SCNVector3(x, y, z)
+          root.addChildNode(node)
+      }
+      
+      // 4 edges parallel to X
+      addBoxEdge(w2: w, h2: Float(t), d2: Float(t), x: 0, y: -hh, z: -hd)
+      addBoxEdge(w2: w, h2: Float(t), d2: Float(t), x: 0, y: -hh, z:  hd)
+      addBoxEdge(w2: w, h2: Float(t), d2: Float(t), x: 0, y:  hh, z: -hd)
+      addBoxEdge(w2: w, h2: Float(t), d2: Float(t), x: 0, y:  hh, z:  hd)
+      
+      // 4 edges parallel to Y
+      addBoxEdge(w2: Float(t), h2: h, d2: Float(t), x: -hw, y: 0, z: -hd)
+      addBoxEdge(w2: Float(t), h2: h, d2: Float(t), x:  hw, y: 0, z: -hd)
+      addBoxEdge(w2: Float(t), h2: h, d2: Float(t), x: -hw, y: 0, z:  hd)
+      addBoxEdge(w2: Float(t), h2: h, d2: Float(t), x:  hw, y: 0, z:  hd)
+      
+      // 4 edges parallel to Z
+      addBoxEdge(w2: Float(t), h2: Float(t), d2: d, x: -hw, y: -hh, z: 0)
+      addBoxEdge(w2: Float(t), h2: Float(t), d2: d, x:  hw, y: -hh, z: 0)
+      addBoxEdge(w2: Float(t), h2: Float(t), d2: d, x: -hw, y:  hh, z: 0)
+      addBoxEdge(w2: Float(t), h2: Float(t), d2: d, x:  hw, y:  hh, z: 0)
+      
+      return root
   }
 
   // MARK: - Load Bounding Boxes (RoomPlan gizmos)
@@ -1298,15 +1414,8 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
       default: color = UIColor.white
       }
       
-      // Create wireframe box
-      let boxGeo = SCNBox(width: CGFloat(w), height: CGFloat(h), length: CGFloat(d), chamferRadius: 0)
-      boxGeo.firstMaterial?.fillMode = .lines
-      boxGeo.firstMaterial?.diffuse.contents = color
-      boxGeo.firstMaterial?.lightingModel = .constant
-      boxGeo.firstMaterial?.isDoubleSided = true
-      boxGeo.firstMaterial?.readsFromDepthBuffer = false
-      
-      let boxNode = SCNNode(geometry: boxGeo)
+      // Create thick wireframe box (10x thicker edges, approx 0.015m)
+      let boxNode = createThickWireframeBox(width: w, height: h, length: d, thickness: 0.015, color: color)
       boxNode.position = SCNVector3(px, py, pz)
       boxNode.renderingOrder = 90
       boxNode.name = "gizmo_\(className)_\(count)"
@@ -1327,6 +1436,148 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
       drawText(text: className.uppercased(), at: SCNVector3(px, py + h/2 + 0.05, pz), scale: 0.003)
       
       count += 1
+    }
+    return count
+  }
+
+  // MARK: - Load Remote Collaboration Objects (Proxy Rendering)
+  func loadRemoteObjects(objects: [[String: Any]]) -> Int {
+    // Clear previously placed remote objects
+    for node in remoteObjectNodes {
+      node.removeFromParentNode()
+    }
+    remoteObjectNodes.removeAll()
+    
+    var count = 0
+    for obj in objects {
+      guard let type = obj["type"] as? String else { continue }
+      
+      let px = Float(obj["x"] as? Double ?? 0)
+      let py = Float(obj["y"] as? Double ?? 0)
+      let pz = Float(obj["z"] as? Double ?? 0)
+      let name = obj["name"] as? String ?? "Object"
+      
+      if type == "model" {
+        // Draw Proxy Bounding Box for .glb models
+        let boxGeo = SCNBox(width: 0.3, height: 0.3, length: 0.3, chamferRadius: 0.02)
+        boxGeo.firstMaterial?.fillMode = .lines
+        boxGeo.firstMaterial?.diffuse.contents = UIColor.magenta.withAlphaComponent(0.8)
+        boxGeo.firstMaterial?.lightingModel = .constant
+        boxGeo.firstMaterial?.isDoubleSided = true
+        
+        let boxNode = SCNNode(geometry: boxGeo)
+        boxNode.position = SCNVector3(px, py + 0.15, pz) // elevate so it sits on floor
+        boxNode.renderingOrder = 95
+        
+        // Label
+        let textGeo = SCNText(string: "🌍 [Web Operator]\n" + name, extrusionDepth: 0.0)
+        textGeo.font = UIFont.systemFont(ofSize: 4)
+        textGeo.firstMaterial?.diffuse.contents = UIColor.white
+        textGeo.firstMaterial?.lightingModel = .constant
+        let textNode = SCNNode(geometry: textGeo)
+        textNode.scale = SCNVector3(0.01, 0.01, 0.01)
+        textNode.position = SCNVector3(0, 0.25, 0)
+        let bc = SCNBillboardConstraint()
+        textNode.constraints = [bc]
+        
+        // Center text pivot
+        let (bMin, bMax) = textNode.boundingBox
+        textNode.pivot = SCNMatrix4MakeTranslation(
+          bMin.x + 0.5*(bMax.x - bMin.x),
+          bMin.y + 0.5*(bMax.y - bMin.y),
+          0
+        )
+        
+        boxNode.addChildNode(textNode)
+        arView.scene.rootNode.addChildNode(boxNode)
+        remoteObjectNodes.append(boxNode)
+        count += 1
+      } else if type == "polygon" || type == "polyline" {
+        guard let points = obj["points"] as? [[String: Any]] else { continue }
+        
+        let shapeColor = UIColor.orange
+        var positions: [SCNVector3] = []
+        for pt in points {
+          let cx = (pt["x"] as? Float) ?? Float(pt["x"] as? Double ?? 0)
+          let cy = (pt["y"] as? Float) ?? Float(pt["y"] as? Double ?? 0)
+          let cz = (pt["z"] as? Float) ?? Float(pt["z"] as? Double ?? 0)
+          positions.append(SCNVector3(cx, cy, cz))
+        }
+        
+        // 1) Draw Base Lines
+        func addRemoteLine(p1: SCNVector3, p2: SCNVector3) {
+            let dx = p2.x - p1.x
+            let dz = p2.z - p1.z
+            let len = sqrt(dx*dx + dz*dz)
+            guard len > 0.001 else { return }
+            
+            let lineBox = SCNBox(width: 0.01, height: 0.01, length: CGFloat(len), chamferRadius: 0)
+            lineBox.firstMaterial?.diffuse.contents = shapeColor
+            lineBox.firstMaterial?.lightingModel = .constant
+            let lineNode = SCNNode(geometry: lineBox)
+            lineNode.position = SCNVector3((p1.x+p2.x)/2, p1.y, (p1.z+p2.z)/2)
+            lineNode.eulerAngles.y = atan2(dx, dz)
+            
+            arView.scene.rootNode.addChildNode(lineNode)
+            remoteObjectNodes.append(lineNode)
+        }
+        
+        for i in 1..<positions.count { addRemoteLine(p1: positions[i-1], p2: positions[i]) }
+        if type == "polygon" && positions.count >= 3 { addRemoteLine(p1: positions.last!, p2: positions.first!) }
+        
+        // 2) Draw 3D Extrusion Wall
+        if let extrudeH = obj["extrusionHeight"] as? Double, extrudeH > 0 {
+            let wallHeight = Float(extrudeH)
+            func buildWall(p1: SCNVector3, p2: SCNVector3) {
+                let dx = p2.x - p1.x
+                let dz = p2.z - p1.z
+                let length = sqrt(dx*dx + dz*dz)
+                guard length > 0.001 else { return }
+                
+                let box = SCNBox(width: CGFloat(length), height: CGFloat(wallHeight), length: 0.02, chamferRadius: 0)
+                box.firstMaterial?.diffuse.contents = shapeColor.withAlphaComponent(0.6)
+                box.firstMaterial?.isDoubleSided = true
+                box.firstMaterial?.lightingModel = .lambert
+                
+                let node = SCNNode(geometry: box)
+                node.position = SCNVector3((p1.x + p2.x)/2, p1.y + wallHeight/2, (p1.z + p2.z)/2)
+                node.eulerAngles.y = atan2(dx, dz) - Float.pi / 2
+                
+                arView.scene.rootNode.addChildNode(node)
+                remoteObjectNodes.append(node)
+            }
+            
+            for i in 1..<positions.count { buildWall(p1: positions[i-1], p2: positions[i]) }
+            if type == "polygon" && positions.count >= 3 { buildWall(p1: positions.last!, p2: positions.first!) }
+        }
+        
+        // 3) Add Label for the shape
+        if let first = positions.first {
+            let shapeName = name == "Object" ? type.capitalized : name
+            let textGeo = SCNText(string: "🌍 [Web Operator]\n" + shapeName, extrusionDepth: 0.0)
+            textGeo.font = UIFont.systemFont(ofSize: 4)
+            textGeo.firstMaterial?.diffuse.contents = UIColor.white
+            textGeo.firstMaterial?.lightingModel = .constant
+            let textNode = SCNNode(geometry: textGeo)
+            textNode.scale = SCNVector3(0.01, 0.01, 0.01)
+            let hOffset: Float = (obj["extrusionHeight"] as? Double ?? 0) > 0 ? Float(obj["extrusionHeight"] as! Double) + 0.15 : 0.15
+            textNode.position = SCNVector3(first.x, first.y + hOffset, first.z)
+            
+            let bc = SCNBillboardConstraint()
+            textNode.constraints = [bc]
+            
+            let (bMin, bMax) = textNode.boundingBox
+            textNode.pivot = SCNMatrix4MakeTranslation(
+              bMin.x + 0.5*(bMax.x - bMin.x),
+              bMin.y + 0.5*(bMax.y - bMin.y),
+              0
+            )
+            arView.scene.rootNode.addChildNode(textNode)
+            remoteObjectNodes.append(textNode)
+        }
+        
+        count += 1
+      }
     }
     return count
   }
@@ -1911,6 +2162,80 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   private func dotProduct(v1: SCNVector3, v2: SCNVector3) -> Float {
     return v1.x * v2.x + v1.y * v2.y + v1.z * v2.z
   }
+
+  // MARK: - ARSessionDelegate to handle interruptions and resume camera
+  func sessionWasInterrupted(_ session: ARSession) {
+    print("[ARKit] Session was interrupted (e.g., app moved to background or camera covered)")
+  }
+
+  func sessionInterruptionEnded(_ session: ARSession) {
+    print("[ARKit] Session interruption ended, resuming tracking...")
+    // Restore world tracking to unfreeze camera
+    let configuration = ARWorldTrackingConfiguration()
+    configuration.planeDetection = [.horizontal, .vertical]
+    if #available(iOS 13.4, *), ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) {
+        configuration.sceneReconstruction = .mesh
+    }
+    session.run(configuration)
+  }
+
+  // MARK: - Photo Capture
+  func takePhoto(promise: ExpoModulesCore.Promise) {
+    guard let frame = arView.session.currentFrame else {
+      promise.reject("ERR", "No AR frame available")
+      return
+    }
+    
+    let pixelBuffer = frame.capturedImage
+    let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+    let context = CIContext()
+    guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else {
+      promise.reject("ERR", "Could not create CGImage")
+      return
+    }
+    
+    // ARKit capturedImage is 90 deg rotated cw in portrait layout.
+    let uiImage = UIImage(cgImage: cgImage, scale: 1.0, orientation: .right)
+    
+    guard let data = uiImage.jpegData(compressionQuality: 0.8) else {
+      promise.reject("ERR", "Could not compress image to JPEG")
+      return
+    }
+    
+    let fm = FileManager.default
+    let path = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jpg")
+    
+    do {
+      try data.write(to: path)
+      
+      let t = frame.camera.transform
+      // 4x4 matrix representing full 6DOF transform
+      let matrix: [Float] = [
+        t.columns.0.x, t.columns.0.y, t.columns.0.z, t.columns.0.w,
+        t.columns.1.x, t.columns.1.y, t.columns.1.z, t.columns.1.w,
+        t.columns.2.x, t.columns.2.y, t.columns.2.z, t.columns.2.w,
+        t.columns.3.x, t.columns.3.y, t.columns.3.z, t.columns.3.w
+      ]
+      
+      promise.resolve([
+        "uri": path.absoluteString,
+        "transform": matrix
+      ])
+    } catch {
+      promise.reject("ERR", "Could not write photo to \(path)")
+    }
+  }
+
+  func session(_ session: ARSession, didFailWithError error: Error) {
+    print("[ARKit] Session failed: \(error.localizedDescription)")
+    // Try to recover to prevent complete freeze
+    let configuration = ARWorldTrackingConfiguration()
+    configuration.planeDetection = [.horizontal, .vertical]
+    if #available(iOS 13.4, *), ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) {
+        configuration.sceneReconstruction = .mesh
+    }
+    session.run(configuration, options: [.resetTracking])
+  }
 }
 
 // MARK: - UIColor Hex Extension
@@ -1944,15 +2269,25 @@ class RoomPlanController: NSObject, RoomCaptureSessionDelegate {
     // Nodes for real-time rendering
     private var roomNodes: [SCNNode] = []
     private let roomRootNode = SCNNode()
+    var isVisible: Bool = true
     
-    // Colors for each element type
-    private let wallColor = UIColor(red: 0.3, green: 0.5, blue: 0.9, alpha: 0.25)
-    private let doorColor = UIColor(red: 1.0, green: 0.6, blue: 0.0, alpha: 0.35)
-    private let windowColor = UIColor(red: 0.0, green: 0.9, blue: 1.0, alpha: 0.35)
-    private let floorColor = UIColor(red: 0.0, green: 0.8, blue: 0.3, alpha: 0.15)
-    private let openingColor = UIColor(red: 0.8, green: 0.8, blue: 0.0, alpha: 0.25)
-    private let objectColor = UIColor(red: 0.9, green: 0.3, blue: 0.9, alpha: 0.2)
-    private let ceilingColor = UIColor(red: 0.7, green: 0.7, blue: 0.9, alpha: 0.1)
+    // Polycam-style colors — subtle fills, bright wireframe edges
+    private let wallColor = UIColor(red: 0.4, green: 0.6, blue: 1.0, alpha: 0.08)
+    private let doorColor = UIColor(red: 1.0, green: 0.65, blue: 0.1, alpha: 0.1)
+    private let windowColor = UIColor(red: 0.0, green: 0.95, blue: 1.0, alpha: 0.1)
+    private let floorColor = UIColor(red: 0.0, green: 0.8, blue: 0.3, alpha: 0.06)
+    private let openingColor = UIColor(red: 0.9, green: 0.9, blue: 0.0, alpha: 0.08)
+    private let objectColor = UIColor(red: 1.0, green: 0.4, blue: 1.0, alpha: 0.08)
+    private let ceilingColor = UIColor(red: 0.7, green: 0.7, blue: 0.9, alpha: 0.05)
+    
+    // Edge colors — bright and visible
+    private let wallEdgeColor = UIColor(red: 0.5, green: 0.7, blue: 1.0, alpha: 1.0)
+    private let doorEdgeColor = UIColor(red: 1.0, green: 0.7, blue: 0.2, alpha: 1.0)
+    private let windowEdgeColor = UIColor(red: 0.0, green: 1.0, blue: 1.0, alpha: 1.0)
+    private let floorEdgeColor = UIColor(red: 0.2, green: 0.9, blue: 0.4, alpha: 1.0)
+    private let openingEdgeColor = UIColor(red: 1.0, green: 1.0, blue: 0.3, alpha: 1.0)
+    private let objectEdgeColor = UIColor.white
+    private let ceilingEdgeColor = UIColor(red: 0.8, green: 0.8, blue: 1.0, alpha: 0.8)
     
     func start(arSession: ARSession) {
         if #available(iOS 17.0, *) {
@@ -2059,6 +2394,7 @@ class RoomPlanController: NSObject, RoomCaptureSessionDelegate {
                 dimensions: wall.dimensions,
                 transform: wall.transform,
                 color: wallColor,
+                edgeColor: wallEdgeColor,
                 label: "Wall"
             )
             roomRootNode.addChildNode(node)
@@ -2071,6 +2407,7 @@ class RoomPlanController: NSObject, RoomCaptureSessionDelegate {
                 dimensions: door.dimensions,
                 transform: door.transform,
                 color: doorColor,
+                edgeColor: doorEdgeColor,
                 label: "Door"
             )
             roomRootNode.addChildNode(node)
@@ -2083,6 +2420,7 @@ class RoomPlanController: NSObject, RoomCaptureSessionDelegate {
                 dimensions: window.dimensions,
                 transform: window.transform,
                 color: windowColor,
+                edgeColor: windowEdgeColor,
                 label: "Window"
             )
             roomRootNode.addChildNode(node)
@@ -2095,6 +2433,7 @@ class RoomPlanController: NSObject, RoomCaptureSessionDelegate {
                 dimensions: opening.dimensions,
                 transform: opening.transform,
                 color: openingColor,
+                edgeColor: openingEdgeColor,
                 label: "Opening"
             )
             roomRootNode.addChildNode(node)
@@ -2108,6 +2447,7 @@ class RoomPlanController: NSObject, RoomCaptureSessionDelegate {
                     dimensions: floor.dimensions,
                     transform: floor.transform,
                     color: floorColor,
+                    edgeColor: floorEdgeColor,
                     label: "Floor"
                 )
                 roomRootNode.addChildNode(node)
@@ -2138,6 +2478,7 @@ class RoomPlanController: NSObject, RoomCaptureSessionDelegate {
                 dimensions: obj.dimensions,
                 transform: obj.transform,
                 color: objectColor,
+                edgeColor: objectEdgeColor,
                 label: label
             )
             roomRootNode.addChildNode(node)
@@ -2145,10 +2486,12 @@ class RoomPlanController: NSObject, RoomCaptureSessionDelegate {
         }
     }
     
-    private func createBoxNode(dimensions: simd_float3, transform: simd_float4x4, color: UIColor, label: String) -> SCNNode {
+    private func createBoxNode(dimensions: simd_float3, transform: simd_float4x4, color: UIColor, edgeColor: UIColor = .white, label: String) -> SCNNode {
         let container = SCNNode()
+        container.categoryBitMask = 4  // Tag for toggle + snapping
+        container.name = "roomplan_\(label.lowercased())"
         
-        // Translucent filled box
+        // Very subtle translucent fill
         let box = SCNBox(width: CGFloat(dimensions.x), height: CGFloat(dimensions.y), length: CGFloat(dimensions.z), chamferRadius: 0)
         let material = SCNMaterial()
         material.diffuse.contents = color
@@ -2158,75 +2501,82 @@ class RoomPlanController: NSObject, RoomCaptureSessionDelegate {
         material.writesToDepthBuffer = false
         box.materials = [material]
         let boxNode = SCNNode(geometry: box)
+        boxNode.categoryBitMask = 4
         container.addChildNode(boxNode)
         
-        // Wireframe edges — THICK offset for visibility
-        let offset: CGFloat = 0.01
-        let wireBox = SCNBox(width: CGFloat(dimensions.x) + offset, height: CGFloat(dimensions.y) + offset, length: CGFloat(dimensions.z) + offset, chamferRadius: 0)
-        let wireMaterial = SCNMaterial()
-        wireMaterial.diffuse.contents = color.withAlphaComponent(1.0)
-        wireMaterial.lightingModel = .constant
-        wireMaterial.fillMode = .lines
-        wireMaterial.isDoubleSided = true
-        wireBox.materials = [wireMaterial]
+        // Primary wireframe — bright, visible edges
+        let wireBox = SCNBox(width: CGFloat(dimensions.x) + 0.005, height: CGFloat(dimensions.y) + 0.005, length: CGFloat(dimensions.z) + 0.005, chamferRadius: 0)
+        let wireMat = SCNMaterial()
+        wireMat.diffuse.contents = edgeColor
+        wireMat.emission.contents = edgeColor.withAlphaComponent(0.6)  // Glow effect
+        wireMat.lightingModel = .constant
+        wireMat.fillMode = .lines
+        wireMat.isDoubleSided = true
+        wireBox.materials = [wireMat]
         let wireNode = SCNNode(geometry: wireBox)
+        wireNode.categoryBitMask = 4
         container.addChildNode(wireNode)
         
-        // Label above — LARGE with emoji prefix and background
-        let emoji: String
-        switch label {
-        case "Wall": emoji = "🧱"
-        case "Door": emoji = "🚪"
-        case "Window": emoji = "🪟"
-        case "Floor": emoji = "⬛"
-        case "Opening": emoji = "🚶"
-        case "Table": emoji = "🪑"
-        case "Chair": emoji = "💺"
-        case "Sofa": emoji = "🛋"
-        case "Bed": emoji = "🛏"
-        case "TV": emoji = "📺"
-        default: emoji = "📦"
-        }
+        // Outer glow wireframe — thicker, softer bloom
+        let glowBox = SCNBox(width: CGFloat(dimensions.x) + 0.02, height: CGFloat(dimensions.y) + 0.02, length: CGFloat(dimensions.z) + 0.02, chamferRadius: 0)
+        let glowMat = SCNMaterial()
+        glowMat.diffuse.contents = edgeColor.withAlphaComponent(0.15)
+        glowMat.emission.contents = edgeColor.withAlphaComponent(0.3)
+        glowMat.lightingModel = .constant
+        glowMat.fillMode = .lines
+        glowMat.isDoubleSided = true
+        glowBox.materials = [glowMat]
+        let glowNode = SCNNode(geometry: glowBox)
+        glowNode.categoryBitMask = 4
+        container.addChildNode(glowNode)
         
-        let displayLabel = "\(emoji) \(label)"
-        let text = SCNText(string: displayLabel, extrusionDepth: 0.5)
-        text.font = UIFont.systemFont(ofSize: 8, weight: .heavy)
+        // Compact label — small, clean, no emoji
+        let text = SCNText(string: label.uppercased(), extrusionDepth: 0.2)
+        text.font = UIFont.systemFont(ofSize: 5, weight: .semibold)
         text.flatness = 0.1
         let textMat = SCNMaterial()
-        textMat.diffuse.contents = UIColor.white
+        textMat.diffuse.contents = edgeColor
+        textMat.emission.contents = edgeColor.withAlphaComponent(0.4)
         textMat.lightingModel = .constant
         text.materials = [textMat]
         let textNode = SCNNode(geometry: text)
-        textNode.scale = SCNVector3(0.008, 0.008, 0.008)
+        textNode.scale = SCNVector3(0.004, 0.004, 0.004)
         let (minBound, maxBound) = textNode.boundingBox
-        let textW = (maxBound.x - minBound.x) * 0.008
-        let textH = (maxBound.y - minBound.y) * 0.008
+        let textW = (maxBound.x - minBound.x) * 0.004
+        let textH = (maxBound.y - minBound.y) * 0.004
         textNode.position = SCNVector3(
             -textW / 2,
-            dimensions.y / 2 + 0.08,
+            dimensions.y / 2 + 0.04,
             0
         )
         
-        // Background pill behind text
-        let bgPlane = SCNPlane(width: CGFloat(textW + 0.04), height: CGFloat(textH + 0.02))
+        // Small dark background pill
+        let bgPlane = SCNPlane(width: CGFloat(textW + 0.02), height: CGFloat(textH + 0.01))
         let bgMat = SCNMaterial()
-        bgMat.diffuse.contents = UIColor.black.withAlphaComponent(0.75)
+        bgMat.diffuse.contents = UIColor.black.withAlphaComponent(0.6)
         bgMat.lightingModel = .constant
         bgPlane.materials = [bgMat]
-        bgPlane.cornerRadius = CGFloat(textH * 0.3)
+        bgPlane.cornerRadius = CGFloat(textH * 0.4)
         let bgNode = SCNNode(geometry: bgPlane)
-        bgNode.position = SCNVector3(0, dimensions.y / 2 + 0.08 + textH / 2, -0.001)
+        bgNode.position = SCNVector3(0, dimensions.y / 2 + 0.04 + textH / 2, -0.001)
         
         let labelGroup = SCNNode()
         labelGroup.addChildNode(bgNode)
         labelGroup.addChildNode(textNode)
         labelGroup.constraints = [SCNBillboardConstraint()]
+        labelGroup.categoryBitMask = 4
         container.addChildNode(labelGroup)
         
         // Apply transform
         container.simdTransform = transform
         
         return container
+    }
+    
+    // MARK: - Toggle Visibility
+    func setVisible(_ visible: Bool) {
+        isVisible = visible
+        roomRootNode.isHidden = !visible
     }
     
     // MARK: - Export structured RoomPlan data

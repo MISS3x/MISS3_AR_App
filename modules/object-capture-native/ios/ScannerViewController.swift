@@ -3,72 +3,199 @@
 import UIKit
 import SwiftUI
 import RealityKit
-import os
+import AVFoundation
+
+// ==========================================================================
+// MARK: - ObjectCaptureViewWrapper
+// EXACT Apple SuperSimpleObjectCapture pattern:
+//   1. session is NON-OPTIONAL, created immediately
+//   2. ObjectCaptureView is shown UNCONDITIONALLY (not behind if-let)
+//   3. session.start() is called in .task {}
+//   4. ObjectCaptureView handles ALL state transitions internally
+//   5. We NEVER call startDetecting() or startCapturing()
+// ==========================================================================
 
 @available(iOS 17.0, *)
 struct ObjectCaptureViewWrapper: View {
-    var session: ObjectCaptureSession
-    var onStateChange: (String) -> Void
+    // NON-OPTIONAL — created immediately, exactly like Apple's sample
+    @State var session = ObjectCaptureSession()
+    @State private var overlayText: String = "⏳ Starting..."
+    @State private var canFinish: Bool = false
     
-    @State private var showOverlayText: String = "Initializing..."
+    var onCancel: (() -> Void)?
+    var onComplete: ((String?) -> Void)?
+    
+    // Directories
+    private let imagesDir: URL
+    private let snapshotsDir: URL
+    
+    init(onCancel: (() -> Void)? = nil, onComplete: ((String?) -> Void)? = nil) {
+        self.onCancel = onCancel
+        self.onComplete = onComplete
+        
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ObjectCapture_\(UUID().uuidString)")
+        self.imagesDir = base.appendingPathComponent("Images")
+        self.snapshotsDir = base.appendingPathComponent("Snapshots")
+        try? FileManager.default.createDirectory(at: imagesDir, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: snapshotsDir, withIntermediateDirectories: true)
+    }
     
     var body: some View {
         ZStack {
+            // ============================================================
+            // ObjectCaptureView is ALWAYS shown — it needs to be present
+            // BEFORE session.start() so it can set up the camera pipeline.
+            // It provides ALL interactive UI: bounding box, continue btn,
+            // orbit guidance, capture feedback.
+            // ============================================================
             ObjectCaptureView(session: session)
+                .edgesIgnoringSafeArea(.all)
             
-            // State overlay at the top
+            // === Status + buttons at TOP — keep bottom clear for Apple's UI ===
             VStack {
-                Text(showOverlayText)
-                    .font(.system(size: 14, weight: .bold, design: .monospaced))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(Color.black.opacity(0.7))
-                    .cornerRadius(8)
-                    .padding(.top, 60)
+                HStack {
+                    // Cancel — top-left
+                    Button(action: {
+                        session.cancel()
+                        onCancel?()
+                    }) {
+                        Text("Cancel")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 10)
+                            .background(Color.black.opacity(0.5))
+                            .cornerRadius(20)
+                    }
+                    
+                    // Manual Start button to bypass auto-detect if stuck
+                    if session.state == .ready {
+                        Button(action: {
+                            print("[ObjectCapture] Manually calling startDetecting()")
+                            session.startDetecting()
+                        }) {
+                            Text("START")
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundColor(.black)
+                                .padding(.horizontal, 18)
+                                .padding(.vertical, 10)
+                                .background(Color.white)
+                                .cornerRadius(20)
+                        }
+                    }
+                    
+                    Spacer()
+                    
+                    // Status text — top-center area
+                    Text(overlayText)
+                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.black.opacity(0.6))
+                        .cornerRadius(8)
+                        .allowsHitTesting(false)
+                    
+                    Spacer()
+                    
+                    // FINISH — top-right (only when scan pass complete)
+                    if canFinish {
+                        Button(action: {
+                            session.finish()
+                            overlayText = "⏳ Finishing..."
+                            canFinish = false
+                        }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 16))
+                                Text("FINISH")
+                                    .font(.system(size: 14, weight: .bold))
+                            }
+                            .foregroundColor(.black)
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 10)
+                            .background(Color(red: 0, green: 1, blue: 0.85))
+                            .cornerRadius(20)
+                        }
+                        .transition(.scale.combined(with: .opacity))
+                    }
+                }
+                .animation(.easeInOut(duration: 0.3), value: canFinish)
+                .animation(.easeInOut(duration: 0.3), value: session.state)
+                .padding(.top, 60)
+                .padding(.horizontal, 16)
                 
-                Spacer()
+                Spacer() // Push everything to top — bottom is 100% Apple's UI
             }
         }
         .task {
-            print("[ObjectCapture] View appeared, monitoring state...")
-            for await newState in session.stateUpdates {
-                let text: String = describeState(newState)
-                showOverlayText = text
-                onStateChange(text)
-                print("[ObjectCapture] State: \(text)")
+            // ============================================================
+            // Apple pattern: start session in .task — view is already
+            // mounted at this point so ObjectCaptureView can set up camera
+            // ============================================================
+            print("[ObjectCapture] Starting session...")
+            print("[ObjectCapture] Images dir: \(imagesDir.path)")
+            
+            var configuration = ObjectCaptureSession.Configuration()
+            configuration.checkpointDirectory = snapshotsDir
+            configuration.isOverCaptureEnabled = true
+            
+            session.start(imagesDirectory: imagesDir, configuration: configuration)
+            print("[ObjectCapture] session.start() called")
+        }
+        .onChange(of: session.state) { _, newValue in
+            print("[ObjectCapture] State → \(newValue)")
+            switch newValue {
+            case .initializing:
+                overlayText = "⏳ Initializing..."
+            case .ready:
+                overlayText = "📦 Point at object"
+            case .detecting:
+                overlayText = "🔍 Adjust box, tap Continue"
+            case .capturing:
+                overlayText = "📸 Move around object"
+            case .finishing:
+                overlayText = "⏳ Finishing..."
+                canFinish = false
+            case .completed:
+                overlayText = "🎉 Done!"
+                canFinish = false
+                let parentDir = imagesDir.deletingLastPathComponent()
+                Task {
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    onComplete?(parentDir.path)
+                }
+            case .failed(let error):
+                overlayText = "❌ \(error.localizedDescription)"
+                canFinish = false
+                Task {
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    onComplete?(nil)
+                }
+            @unknown default:
+                overlayText = "❓ Unknown"
             }
         }
-    }
-    
-    func describeState(_ state: ObjectCaptureSession.CaptureState) -> String {
-        switch state {
-        case .initializing:
-            return "⏳ Initializing session..."
-        case .ready:
-            return "✅ Ready — Point camera at object"
-        case .detecting:
-            return "🔍 Detecting object — Move closer"
-        case .capturing:
-            return "📸 Capturing — Move around object slowly"
-        case .finishing:
-            return "⏳ Finishing capture..."
-        case .completed:
-            return "🎉 Capture complete!"
-        case .failed(let error):
-            return "❌ Failed: \(error.localizedDescription)"
-        @unknown default:
-            return "❓ Unknown state"
+        .onChange(of: session.userCompletedScanPass) { _, newValue in
+            if newValue == true {
+                canFinish = true
+                overlayText = "✅ Orbit done — FINISH or keep going"
+                print("[ObjectCapture] userCompletedScanPass = true")
+            }
         }
     }
 }
 
+// ==========================================================================
+// MARK: - UIKit ViewController (bridge from React Native / Expo Module)
+// ==========================================================================
+
 @available(iOS 17.0, *)
 class ScannerViewController: UIViewController {
     
-    var session: ObjectCaptureSession?
-    var imageDir: URL?
     var onCompletion: ((String?) -> Void)?
+    private var hostingController: UIViewController?
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -76,100 +203,60 @@ class ScannerViewController: UIViewController {
         
         print("[ObjectCapture] ScannerViewController loading...")
         
-        // 1. Check device support
-        guard ObjectCaptureSession.isSupported else {
-            print("[ObjectCapture] ERROR: Device does not support ObjectCaptureSession")
-            let alert = UIAlertController(title: "Not Supported", message: "This device does not support Object Capture. Requires LiDAR + A15 chip or newer.", preferredStyle: .alert)
-            alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in
-                self.dismiss(animated: true) { self.onCompletion?(nil) }
-            })
-            present(alert, animated: true)
-            return
-        }
-        
-        print("[ObjectCapture] Device supported ✅")
-        
-        // 2. Create a directory to store the captured images
-        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("ObjectCapture_\(UUID().uuidString)")
-        do {
-            try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true, attributes: nil)
-            self.imageDir = tempDir
-            print("[ObjectCapture] Image dir: \(tempDir.path)")
-        } catch {
-            print("[ObjectCapture] Failed to create image directory: \(error)")
-            onCompletion?(nil)
-            dismiss(animated: true)
-            return
-        }
-        
-        // 3. Create checkpoint directory
-        let checkpointDir = tempDir.appendingPathComponent("Snapshots")
-        do {
-            try FileManager.default.createDirectory(at: checkpointDir, withIntermediateDirectories: true, attributes: nil)
-        } catch {
-            print("[ObjectCapture] Failed to create checkpoint dir: \(error)")
-        }
-        
-        // 4. Initialize the ObjectCaptureSession
-        var configuration = ObjectCaptureSession.Configuration()
-        configuration.checkpointDirectory = checkpointDir
-        
-        session = ObjectCaptureSession()
-        
-        guard let session = session else {
-            print("[ObjectCapture] ERROR: Failed to create ObjectCaptureSession")
-            onCompletion?(nil)
-            dismiss(animated: true)
-            return
-        }
-        
-        print("[ObjectCapture] Session created, initial state: \(session.state)")
-        
-        // 5. Create the SwiftUI ObjectCaptureView wrapper
-        let contentView = ObjectCaptureViewWrapper(session: session) { [weak self] (stateStr: String) in
-            print("[ObjectCapture] State callback: \(stateStr)")
-            
-            if stateStr.contains("complete") {
-                DispatchQueue.main.async {
-                    self?.dismiss(animated: true) { self?.onCompletion?(self?.imageDir?.path) }
+        Task { @MainActor in
+            let status = AVCaptureDevice.authorizationStatus(for: .video)
+            if status == .notDetermined {
+                let granted = await AVCaptureDevice.requestAccess(for: .video)
+                if !granted {
+                    showError("Camera access is required.")
+                    return
                 }
-            } else if stateStr.contains("Failed") {
-                DispatchQueue.main.async {
-                    self?.dismiss(animated: true) { self?.onCompletion?(nil) }
-                }
+            } else if status != .authorized {
+                showError("Camera access denied. Check Settings.")
+                return
             }
+            
+            guard ObjectCaptureSession.isSupported else {
+                showError("Device does not support Object Capture.")
+                return
+            }
+            
+            presentCaptureView()
         }
-        let hostingController = UIHostingController(rootView: contentView)
-        
-        addChild(hostingController)
-        view.addSubview(hostingController.view)
-        hostingController.view.frame = view.bounds
-        hostingController.view.autoresizingMask = UIView.AutoresizingMask([.flexibleWidth, .flexibleHeight])
-        hostingController.didMove(toParent: self)
-        
-        // 6. Add a custom Close/Cancel button
-        let closeButton = UIButton(type: .system)
-        closeButton.setTitle("Cancel", for: .normal)
-        closeButton.setTitleColor(.white, for: .normal)
-        closeButton.backgroundColor = UIColor(white: 0.2, alpha: 0.8)
-        closeButton.layer.cornerRadius = 8
-        closeButton.frame = CGRect(x: 20, y: 50, width: 80, height: 40)
-        closeButton.addTarget(self, action: #selector(cancelCapture), for: .touchUpInside)
-        view.addSubview(closeButton)
-        view.bringSubviewToFront(closeButton)
-        
-        // 7. Start the session
-        print("[ObjectCapture] Starting session with imagesDirectory: \(tempDir.path)")
-        session.start(imagesDirectory: tempDir, configuration: configuration)
-        print("[ObjectCapture] Session started, state after start: \(session.state)")
     }
     
-    @objc func cancelCapture() {
-        print("[ObjectCapture] Cancel pressed")
-        session?.cancel()
-        dismiss(animated: true) {
-            self.onCompletion?(nil)
-        }
+    private func showError(_ message: String) {
+        let alert = UIAlertController(title: "Object Capture", message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in
+            self.dismiss(animated: true) { self.onCompletion?(nil) }
+        })
+        present(alert, animated: true)
+    }
+    
+    private func presentCaptureView() {
+        print("[ObjectCapture] Presenting capture view")
+        
+        let captureView = ObjectCaptureViewWrapper(
+            onCancel: { [weak self] in
+                self?.dismiss(animated: true) { self?.onCompletion?(nil) }
+            },
+            onComplete: { [weak self] path in
+                self?.dismiss(animated: true) { self?.onCompletion?(path) }
+            }
+        )
+        
+        let hc = UIHostingController(rootView: captureView)
+        self.hostingController = hc
+        
+        addChild(hc)
+        self.view.addSubview(hc.view)
+        hc.view.frame = self.view.bounds
+        hc.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        hc.didMove(toParent: self)
+    }
+    
+    deinit {
+        print("[ObjectCapture] ScannerViewController deallocated")
     }
 }
 

@@ -144,7 +144,7 @@ export default function ARTapeScreen({ navigation }: any) {
       if (floorplanTimerRef.current) clearInterval(floorplanTimerRef.current);
       floorplanTimerRef.current = setInterval(async () => {
         try {
-          const rpData = await rulerRef.current?.getRoomPlanData();
+          const rpData = await rulerRef.current?.exportRoomPlanData();
           if (rpData && fpId) {
             const { error: updErr } = await supabase.from('ar_tape_floorplan').update({
               walls: rpData.walls || [],

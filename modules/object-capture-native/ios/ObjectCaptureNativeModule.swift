@@ -36,15 +36,26 @@ public class ObjectCaptureNativeModule: Module {
             scannerVC.onCompletion = { [weak self] imageDirPath in
                 self?.activeScannerVC = nil  // Release after completion
                 if let path = imageDirPath {
-                    // Count images in directory to verify capture quality
-                    let imageDir = URL(fileURLWithPath: path)
-                    let imageCount = (try? FileManager.default.contentsOfDirectory(at: imageDir, includingPropertiesForKeys: nil)
+                    // ObjectCaptureSession saves images into an "Images" subdirectory
+                    // The callback gives us the PARENT dir — check both locations
+                    let parentDir = URL(fileURLWithPath: path)
+                    let imagesSubdir = parentDir.appendingPathComponent("Images")
+                    
+                    // Try Images/ subdir first, then fall back to parent dir
+                    let actualImageDir: URL
+                    if FileManager.default.fileExists(atPath: imagesSubdir.path) {
+                        actualImageDir = imagesSubdir
+                    } else {
+                        actualImageDir = parentDir
+                    }
+                    
+                    let imageCount = (try? FileManager.default.contentsOfDirectory(at: actualImageDir, includingPropertiesForKeys: nil)
                         .filter { ["jpg", "jpeg", "heic", "png"].contains($0.pathExtension.lowercased()) }
                         .count) ?? 0
                     
-                    print("[ObjectCapture] Scan completed with \(imageCount) images at: \(path)")
+                    print("[ObjectCapture] Scan completed with \(imageCount) images at: \(actualImageDir.path)")
                     promise.resolve([
-                        "imageDirectory": path,
+                        "imageDirectory": actualImageDir.path,
                         "imageCount": imageCount
                     ])
                 } else {

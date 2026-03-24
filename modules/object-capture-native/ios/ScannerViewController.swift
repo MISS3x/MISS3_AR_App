@@ -69,7 +69,7 @@ struct ObjectCaptureViewWrapper: View {
                             .cornerRadius(20)
                     }
                     
-                    // Manual Start button to bypass auto-detect if stuck
+                    // Manual Fallback buttons to bypass frozen states
                     if session.state == .ready {
                         Button(action: {
                             print("[ObjectCapture] Manually calling startDetecting()")
@@ -81,6 +81,19 @@ struct ObjectCaptureViewWrapper: View {
                                 .padding(.horizontal, 18)
                                 .padding(.vertical, 10)
                                 .background(Color.white)
+                                .cornerRadius(20)
+                        }
+                    } else if session.state == .detecting {
+                        Button(action: {
+                            print("[ObjectCapture] Manually calling startCapturing()")
+                            session.startCapturing()
+                        }) {
+                            Text("CONTINUE")
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundColor(.black)
+                                .padding(.horizontal, 18)
+                                .padding(.vertical, 10)
+                                .background(Color.yellow)
                                 .cornerRadius(20)
                         }
                     }
@@ -99,9 +112,10 @@ struct ObjectCaptureViewWrapper: View {
                     
                     Spacer()
                     
-                    // FINISH — top-right (only when scan pass complete)
-                    if canFinish {
+                    // FINISH — top-right
+                    if session.state == .capturing || canFinish {
                         Button(action: {
+                            print("[ObjectCapture] Manually calling finish()")
                             session.finish()
                             overlayText = "⏳ Finishing..."
                             canFinish = false

@@ -139,6 +139,22 @@ public class ARRulerNativeModule: Module {
         return view.exportRoomPlanData()
       }
 
+      AsyncFunction("exportRoomPlanElements") { (view: ARRulerNativeView) -> [[String: Any]] in
+        return view.exportRoomPlanElements()
+      }
+
+      AsyncFunction("addSceneAnchor") { (view: ARRulerNativeView, name: String, type: String) -> [String: Any]? in
+        return view.addSceneAnchor(name: name, type: type)
+      }
+
+      AsyncFunction("exportSceneAnchors") { (view: ARRulerNativeView) -> [[String: Any]] in
+        return view.exportSceneAnchors()
+      }
+
+      AsyncFunction("loadSceneAnchors") { (view: ARRulerNativeView, anchors: [[String: Any]]) -> Int in
+        return view.loadSceneAnchors(anchors: anchors)
+      }
+
       AsyncFunction("finalizeRoomPlan") { (view: ARRulerNativeView) in
         view.finalizeRoomPlan()
       }
@@ -149,6 +165,76 @@ public class ARRulerNativeModule: Module {
 
       AsyncFunction("stopRoomScan") { (view: ARRulerNativeView) in
         view.stopRoomScan()
+      }
+
+      AsyncFunction("pauseRoomScan") { (view: ARRulerNativeView) -> Bool in
+        return view.pauseRoomScan()
+      }
+
+      AsyncFunction("resumeRoomScan") { (view: ARRulerNativeView) -> Bool in
+        return view.resumeRoomScan()
+      }
+
+      AsyncFunction("getCameraTransform") { (view: ARRulerNativeView) -> [Float]? in
+        return view.getCameraTransform()
+      }
+
+      AsyncFunction("enableAutoPhoto") { (view: ARRulerNativeView, enabled: Bool, spacing: Float) in
+        view.enableAutoPhoto(enabled: enabled, spacing: spacing)
+      }
+
+      AsyncFunction("exportAutoPhotos") { (view: ARRulerNativeView) -> [[String: Any]] in
+        return view.exportAutoPhotos()
+      }
+
+      AsyncFunction("getAutoPhotoCount") { (view: ARRulerNativeView) -> Int in
+        return view.getAutoPhotoCount()
+      }
+
+      // --- Manual Anchor Placement & Matching ---
+      AsyncFunction("placeManualAnchor") { (view: ARRulerNativeView, type: String) -> [String: Any]? in
+        return view.placeManualAnchor(type: type)
+      }
+
+      AsyncFunction("getManualAnchorCount") { (view: ARRulerNativeView) -> Int in
+        return view.getManualAnchorCount()
+      }
+
+      AsyncFunction("getManualAnchors") { (view: ARRulerNativeView) -> [[String: Any]] in
+        return view.getManualAnchors()
+      }
+
+      AsyncFunction("startAnchorMatching") { (view: ARRulerNativeView, previousAnchors: [[String: Any]]) in
+        view.startAnchorMatching(previousAnchors: previousAnchors)
+      }
+
+      AsyncFunction("matchAnchor") { (view: ARRulerNativeView, index: Int) -> Bool in
+        return view.matchAnchor(index: index)
+      }
+
+      AsyncFunction("getMatchedCount") { (view: ARRulerNativeView) -> Int in
+        return view.getMatchedCount()
+      }
+
+      AsyncFunction("computeKabschTransform") { (view: ARRulerNativeView) -> [Float]? in
+        return view.computeKabschTransform()
+      }
+
+      AsyncFunction("clearMatchingState") { (view: ARRulerNativeView) in
+        view.clearMatchingState()
+      }
+
+      // --- Tape Visualization ---
+      AsyncFunction("extrudeWall") { (view: ARRulerNativeView, points: [[String: Float]], height: Float, label: String) in
+        view.extrudeWall(points: points, height: height, label: label)
+      }
+
+      AsyncFunction("showAreaSurface") { (view: ARRulerNativeView, points: [[String: Float]], label: String) in
+        view.showAreaSurface(points: points, label: label)
+      }
+
+      AsyncFunction("clearTapeVisualizations") { (view: ARRulerNativeView) in
+        view.clearTapeVisualizations()
       }
 
       AsyncFunction("takePhoto") { (view: ARRulerNativeView, promise: Promise) in

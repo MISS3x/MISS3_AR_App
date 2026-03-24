@@ -64,6 +64,13 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   // Camera Trajectory
   private var cameraTrajectory: [[String: Float]] = []
   private var lastTrajectoryTime: TimeInterval = 0
+  
+  // Auto-Photo Grid
+  var autoPhotoEnabled: Bool = false
+  private var autoPhotoGridSpacing: Float = 1.0  // meters
+  private var lastAutoPhotoPosition: SCNVector3?
+  private var autoPhotoPaths: [[String: Any]] = []  // [{uri, transform, position}]
+  private var autoPhotoMarkerNodes: [SCNNode] = []
 
   // RoomPlan (iOS 16+)
   private var roomPlanController: Any?
@@ -73,6 +80,8 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   private var lineNodes: [SCNNode] = []
   private var labels: [SCNNode] = []
   private var remoteObjectNodes: [SCNNode] = []
+  var sceneAnchors: [[String: Any]] = []  // Named anchors for multi-session alignment
+  var sceneAnchorNodes: [SCNNode] = []     // Visual markers for anchors
   
   // Ghost preview line (from last point to cursor)
   private var ghostLineNode: SCNNode?
@@ -299,6 +308,22 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
         "x": t.columns.3.x, "y": t.columns.3.y, "z": t.columns.3.z
       ]
       cameraTrajectory.append(point)
+      
+      // Auto-photo: check distance from last photo position
+      if autoPhotoEnabled {
+        let camPos = SCNVector3(t.columns.3.x, t.columns.3.y, t.columns.3.z)
+        if let lastPos = lastAutoPhotoPosition {
+          let dx = camPos.x - lastPos.x
+          let dz = camPos.z - lastPos.z
+          let dist = sqrt(dx*dx + dz*dz)
+          if dist >= autoPhotoGridSpacing {
+            autoCapture(at: camPos, frame: frame)
+          }
+        } else {
+          // First photo when auto-photo starts
+          autoCapture(at: camPos, frame: frame)
+        }
+      }
     }
     
     let cameraPos = SCNVector3(frame.camera.transform.columns.3.x,
@@ -1208,7 +1233,7 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
          }
          configuration.initialWorldMap = worldMap
          
-         arView.session.run(configuration, options: [.resetTracking, .removeExistingAnchors])
+         arView.session.run(configuration, options: [.resetTracking])
          promise.resolve(true)
       } else {
          promise.reject("WORLDMAP_LOAD", "Failed to deserialize ARWorldMap")
@@ -1216,6 +1241,144 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
     } catch {
       promise.reject("WORLDMAP_READ", error.localizedDescription)
     }
+  }
+
+  // MARK: - Scene Anchors (Multi-Session Alignment)
+  
+  func addSceneAnchor(name: String, type: String) -> [String: Any]? {
+    let camera = arView.session.currentFrame?.camera
+    guard let transform = camera?.transform else { return nil }
+    
+    let position = transform.columns.3
+    let rotation = camera?.eulerAngles ?? simd_float3(0, 0, 0)
+    
+    let anchorId = UUID().uuidString
+    let anchor: [String: Any] = [
+      "id": anchorId,
+      "name": name,
+      "type": type,
+      "position_x": position.x,
+      "position_y": position.y,
+      "position_z": position.z,
+      "rotation_x": rotation.x,
+      "rotation_y": rotation.y,
+      "rotation_z": rotation.z
+    ]
+    sceneAnchors.append(anchor)
+    
+    // Render visual marker
+    let markerNode = createAnchorMarker(
+      position: SCNVector3(position.x, position.y, position.z),
+      name: name,
+      type: type
+    )
+    arView.scene.rootNode.addChildNode(markerNode)
+    sceneAnchorNodes.append(markerNode)
+    
+    print("[SceneAnchor] Added '\(name)' (\(type)) at (\(position.x), \(position.y), \(position.z))")
+    return anchor
+  }
+  
+  func exportSceneAnchors() -> [[String: Any]] {
+    return sceneAnchors
+  }
+  
+  func loadSceneAnchors(anchors: [[String: Any]]) -> Int {
+    // Clear existing markers
+    for node in sceneAnchorNodes {
+      node.removeFromParentNode()
+    }
+    sceneAnchorNodes.removeAll()
+    sceneAnchors.removeAll()
+    
+    var count = 0
+    for anchor in anchors {
+      let px = Float(anchor["position_x"] as? Double ?? 0)
+      let py = Float(anchor["position_y"] as? Double ?? 0)
+      let pz = Float(anchor["position_z"] as? Double ?? 0)
+      let name = anchor["name"] as? String ?? "Anchor"
+      let type = anchor["type"] as? String ?? "manual"
+      
+      sceneAnchors.append(anchor)
+      
+      let markerNode = createAnchorMarker(
+        position: SCNVector3(px, py, pz),
+        name: name,
+        type: type
+      )
+      arView.scene.rootNode.addChildNode(markerNode)
+      sceneAnchorNodes.append(markerNode)
+      count += 1
+    }
+    print("[SceneAnchor] Loaded \(count) anchors")
+    return count
+  }
+  
+  func createAnchorMarker(position: SCNVector3, name: String, type: String) -> SCNNode {
+    let container = SCNNode()
+    container.position = position
+    
+    // Color by type
+    let color: UIColor
+    switch type {
+    case "manual":          color = UIColor(red: 0.2, green: 0.9, blue: 0.3, alpha: 1.0) // green
+    case "auto":            color = UIColor(red: 0.3, green: 0.6, blue: 1.0, alpha: 1.0) // blue
+    case "roomplan_corner": color = UIColor(red: 1.0, green: 0.6, blue: 0.2, alpha: 1.0) // orange
+    default:                color = UIColor.white
+    }
+    
+    // Sphere marker
+    let sphere = SCNSphere(radius: 0.03)
+    sphere.firstMaterial?.diffuse.contents = color
+    sphere.firstMaterial?.emission.contents = color.withAlphaComponent(0.5)
+    sphere.firstMaterial?.lightingModel = .constant
+    let sphereNode = SCNNode(geometry: sphere)
+    container.addChildNode(sphereNode)
+    
+    // Pulsing ring
+    let ring = SCNTorus(ringRadius: 0.05, pipeRadius: 0.003)
+    ring.firstMaterial?.diffuse.contents = color.withAlphaComponent(0.6)
+    ring.firstMaterial?.emission.contents = color.withAlphaComponent(0.3)
+    ring.firstMaterial?.lightingModel = .constant
+    let ringNode = SCNNode(geometry: ring)
+    container.addChildNode(ringNode)
+    
+    // Vertical line (pole) for visibility
+    let pole = SCNCylinder(radius: 0.002, height: 0.15)
+    pole.firstMaterial?.diffuse.contents = color.withAlphaComponent(0.4)
+    pole.firstMaterial?.lightingModel = .constant
+    let poleNode = SCNNode(geometry: pole)
+    poleNode.position = SCNVector3(0, 0.075, 0)
+    container.addChildNode(poleNode)
+    
+    // Billboard label
+    let emoji: String
+    switch type {
+    case "manual":          emoji = "📌"
+    case "auto":            emoji = "🔵"
+    case "roomplan_corner": emoji = "🔶"
+    default:                emoji = "⚓"
+    }
+    let textGeo = SCNText(string: "\(emoji) \(name)", extrusionDepth: 0.0)
+    textGeo.font = UIFont.systemFont(ofSize: 4, weight: .semibold)
+    textGeo.firstMaterial?.diffuse.contents = UIColor.white
+    textGeo.firstMaterial?.emission.contents = color.withAlphaComponent(0.4)
+    textGeo.firstMaterial?.lightingModel = .constant
+    let textNode = SCNNode(geometry: textGeo)
+    textNode.scale = SCNVector3(0.01, 0.01, 0.01)
+    textNode.position = SCNVector3(0, 0.18, 0)
+    textNode.constraints = [SCNBillboardConstraint()]
+    
+    // Center text
+    let (bMin, bMax) = textNode.boundingBox
+    textNode.pivot = SCNMatrix4MakeTranslation(
+      bMin.x + 0.5 * (bMax.x - bMin.x),
+      bMin.y + 0.5 * (bMax.y - bMin.y), 0
+    )
+    container.addChildNode(textNode)
+    
+    container.name = "scene_anchor_\(name)"
+    return container
   }
 
   // MARK: - Export RoomPlan structured data
@@ -1237,12 +1400,22 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
     }
   }
 
-  // MARK: - Start Room Scan (user-controlled)
+  // MARK: - Export individual RoomPlan elements with UUIDs
+  func exportRoomPlanElements() -> [[String: Any]] {
+    if #available(iOS 16.0, *) {
+        if let rpc = roomPlanController as? RoomPlanController {
+            return rpc.exportRoomPlanElements()
+        }
+    }
+    return []
+  }
+
+  // MARK: - Start Room Scan (shared AR session for correct coordinates)
   func startRoomScan() {
     if #available(iOS 16.0, *) {
         if let rpc = roomPlanController as? RoomPlanController {
             rpc.start(arSession: arView.session)
-            print("[RoomPlan] User started room scan")
+            print("[RoomPlan] User started room scan (shared AR session)")
         }
     }
   }
@@ -1265,20 +1438,103 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
     }
   }
 
+  // MARK: - Pause/Resume Room Scan (for Object Detail Capture)
+  private var isRoomPaused = false
+
+  func pauseRoomScan() -> Bool {
+    if #available(iOS 16.0, *) {
+        if let rpc = roomPlanController as? RoomPlanController, rpc.session != nil {
+            // RoomCaptureSession doesn't have pause(), so we stop and flag for resume
+            isRoomPaused = true
+            print("[RoomPlan] ⏸ Room scan PAUSED (flagged for resume)")
+            return true
+        }
+    }
+    return false
+  }
+  
+  func resumeRoomScan() -> Bool {
+    if #available(iOS 16.0, *) {
+        if isRoomPaused {
+            isRoomPaused = false
+            // Restart the room scan session using shared AR session
+            if let rpc = roomPlanController as? RoomPlanController {
+                let config = RoomCaptureSession.Configuration()
+                rpc.session?.run(configuration: config)
+                print("[RoomPlan] ▶ Room scan RESUMED")
+                return true
+            }
+        }
+    }
+    return false
+  }
+  
+  // MARK: - Get Camera Transform (4x4 matrix as flat array)
+  func getCameraTransform() -> [Float]? {
+    guard let frame = arView.session.currentFrame else { return nil }
+    let t = frame.camera.transform
+    return [
+      t.columns.0.x, t.columns.0.y, t.columns.0.z, t.columns.0.w,
+      t.columns.1.x, t.columns.1.y, t.columns.1.z, t.columns.1.w,
+      t.columns.2.x, t.columns.2.y, t.columns.2.z, t.columns.2.w,
+      t.columns.3.x, t.columns.3.y, t.columns.3.z, t.columns.3.w,
+    ]
+  }
+
   // MARK: - Load Shapes from Supabase
   func loadShapes(shapes: [[String: Any]]) -> Int {
     var count = 0
     for shape in shapes {
-      guard let payload = shape["payload"] as? [String: Any],
-            let pointsArr = payload["points"] as? [[String: Any]] else { continue }
-      
+      guard let payload = shape["payload"] as? [String: Any] else { continue }
       let shapeType = payload["type"] as? String ?? "floor"
+      
       let color: UIColor
       switch shapeType {
       case "wall": color = wallPink
       case "free", "line", "polyline": color = freeOrange
       default: color = tronBlue
       }
+      
+      if ["cube", "cylinder", "sphere"].contains(shapeType) {
+          guard let positionDict = payload["position"] as? [String: Any],
+                let rotationDict = payload["rotation"] as? [String: Any],
+                let scaleDict = payload["scale"] as? [String: Any] else { continue }
+          
+          let px = Float(positionDict["x"] as? Double ?? 0)
+          let py = Float(positionDict["y"] as? Double ?? 0)
+          let pz = Float(positionDict["z"] as? Double ?? 0)
+          
+          let rx = Float(rotationDict["x"] as? Double ?? 0)
+          let ry = Float(rotationDict["y"] as? Double ?? 0)
+          let rz = Float(rotationDict["z"] as? Double ?? 0)
+          
+          let sx = Float(scaleDict["x"] as? Double ?? 1)
+          let sy = Float(scaleDict["y"] as? Double ?? 1)
+          let sz = Float(scaleDict["z"] as? Double ?? 1)
+          
+          let geo: SCNGeometry
+          switch shapeType {
+          case "cube":   geo = SCNBox(width: 1, height: 1, length: 1, chamferRadius: 0)
+          case "sphere": geo = SCNSphere(radius: 0.5)
+          case "cylinder": geo = SCNCylinder(radius: 0.5, height: 1)
+          default:       geo = SCNBox(width: 1, height: 1, length: 1, chamferRadius: 0)
+          }
+          
+          geo.firstMaterial?.diffuse.contents = color.withAlphaComponent(0.8)
+          geo.firstMaterial?.isDoubleSided = true
+          geo.firstMaterial?.lightingModel = .lambert
+          
+          let node = SCNNode(geometry: geo)
+          node.position = SCNVector3(px, py, pz)
+          node.eulerAngles = SCNVector3(rx, ry, rz)
+          node.scale = SCNVector3(sx, sy, sz)
+          
+          arView.scene.rootNode.addChildNode(node)
+          count += 1
+          continue
+      }
+      
+      guard let pointsArr = payload["points"] as? [[String: Any]] else { continue }
       
       var positions: [SCNVector3] = []
       for pt in pointsArr {
@@ -1491,6 +1747,59 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
         boxNode.addChildNode(textNode)
         arView.scene.rootNode.addChildNode(boxNode)
         remoteObjectNodes.append(boxNode)
+        count += 1
+      } else if ["cube", "cylinder", "sphere"].contains(type) {
+        // Web editor primitives (position/rotation/scale)
+        guard let posDict = obj["position"] as? [String: Any],
+              let rotDict = obj["rotation"] as? [String: Any],
+              let scaleDict = obj["scale"] as? [String: Any] else { continue }
+        
+        let primPx = Float(posDict["x"] as? Double ?? 0)
+        let primPy = Float(posDict["y"] as? Double ?? 0)
+        let primPz = Float(posDict["z"] as? Double ?? 0)
+        let primRx = Float(rotDict["x"] as? Double ?? 0)
+        let primRy = Float(rotDict["y"] as? Double ?? 0)
+        let primRz = Float(rotDict["z"] as? Double ?? 0)
+        let primSx = Float(scaleDict["x"] as? Double ?? 1)
+        let primSy = Float(scaleDict["y"] as? Double ?? 1)
+        let primSz = Float(scaleDict["z"] as? Double ?? 1)
+        
+        let geo: SCNGeometry
+        switch type {
+        case "cube":     geo = SCNBox(width: 1, height: 1, length: 1, chamferRadius: 0)
+        case "sphere":   geo = SCNSphere(radius: 0.5)
+        case "cylinder": geo = SCNCylinder(radius: 0.5, height: 1)
+        default:         geo = SCNBox(width: 1, height: 1, length: 1, chamferRadius: 0)
+        }
+        
+        let primColor = UIColor.cyan.withAlphaComponent(0.6)
+        geo.firstMaterial?.diffuse.contents = primColor
+        geo.firstMaterial?.isDoubleSided = true
+        geo.firstMaterial?.lightingModel = .lambert
+        
+        let primNode = SCNNode(geometry: geo)
+        primNode.position = SCNVector3(primPx, primPy, primPz)
+        primNode.eulerAngles = SCNVector3(primRx, primRy, primRz)
+        primNode.scale = SCNVector3(primSx, primSy, primSz)
+        
+        // Label
+        let primText = SCNText(string: "🌍 [Web]\n\(type.capitalized)", extrusionDepth: 0.0)
+        primText.font = UIFont.systemFont(ofSize: 4)
+        primText.firstMaterial?.diffuse.contents = UIColor.white
+        primText.firstMaterial?.lightingModel = .constant
+        let primTextNode = SCNNode(geometry: primText)
+        primTextNode.scale = SCNVector3(0.01, 0.01, 0.01)
+        primTextNode.position = SCNVector3(0, Float(primSy) * 0.5 + 0.15, 0)
+        primTextNode.constraints = [SCNBillboardConstraint()]
+        let (bMin2, bMax2) = primTextNode.boundingBox
+        primTextNode.pivot = SCNMatrix4MakeTranslation(
+          bMin2.x + 0.5*(bMax2.x - bMin2.x),
+          bMin2.y + 0.5*(bMax2.y - bMin2.y), 0
+        )
+        primNode.addChildNode(primTextNode)
+        
+        arView.scene.rootNode.addChildNode(primNode)
+        remoteObjectNodes.append(primNode)
         count += 1
       } else if type == "polygon" || type == "polyline" {
         guard let points = obj["points"] as? [[String: Any]] else { continue }
@@ -2225,6 +2534,574 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
       promise.reject("ERR", "Could not write photo to \(path)")
     }
   }
+  
+  // MARK: - Auto-Photo Capture (internal, triggered by distance)
+  
+  private func autoCapture(at position: SCNVector3, frame: ARFrame) {
+    lastAutoPhotoPosition = position
+    
+    let pixelBuffer = frame.capturedImage
+    let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+    let context = CIContext()
+    guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else { return }
+    
+    let uiImage = UIImage(cgImage: cgImage, scale: 1.0, orientation: .right)
+    guard let data = uiImage.jpegData(compressionQuality: 0.6) else { return }
+    
+    let fm = FileManager.default
+    let path = fm.temporaryDirectory.appendingPathComponent("auto_\(UUID().uuidString).jpg")
+    
+    do {
+      try data.write(to: path)
+      
+      let t = frame.camera.transform
+      let matrix: [Float] = [
+        t.columns.0.x, t.columns.0.y, t.columns.0.z, t.columns.0.w,
+        t.columns.1.x, t.columns.1.y, t.columns.1.z, t.columns.1.w,
+        t.columns.2.x, t.columns.2.y, t.columns.2.z, t.columns.2.w,
+        t.columns.3.x, t.columns.3.y, t.columns.3.z, t.columns.3.w
+      ]
+      
+      autoPhotoPaths.append([
+        "uri": path.absoluteString,
+        "transform": matrix,
+        "position_x": position.x,
+        "position_y": position.y,
+        "position_z": position.z
+      ])
+      
+      // Place pink dot marker in AR
+      let marker = SCNNode()
+      marker.position = position
+      let sphere = SCNSphere(radius: 0.03)
+      sphere.firstMaterial?.diffuse.contents = UIColor(red: 1.0, green: 0.2, blue: 0.6, alpha: 0.9)
+      sphere.firstMaterial?.emission.contents = UIColor(red: 1.0, green: 0.2, blue: 0.6, alpha: 0.5)
+      marker.geometry = sphere
+      
+      // Add pulsing animation
+      let pulse = CABasicAnimation(keyPath: "scale")
+      pulse.fromValue = NSValue(scnVector3: SCNVector3(1, 1, 1))
+      pulse.toValue = NSValue(scnVector3: SCNVector3(1.3, 1.3, 1.3))
+      pulse.duration = 0.8
+      pulse.autoreverses = true
+      pulse.repeatCount = .infinity
+      marker.addAnimation(pulse, forKey: "pulse")
+      
+      arView.scene.rootNode.addChildNode(marker)
+      autoPhotoMarkerNodes.append(marker)
+      
+      print("[AutoPhoto] 📸 Captured at (\(String(format: "%.2f", position.x)), \(String(format: "%.2f", position.z))) — total: \(autoPhotoPaths.count)")
+    } catch {
+      print("[AutoPhoto] ❌ Failed to write auto photo")
+    }
+  }
+  
+  func enableAutoPhoto(enabled: Bool, spacing: Float) {
+    autoPhotoEnabled = enabled
+    autoPhotoGridSpacing = spacing
+    if !enabled {
+      lastAutoPhotoPosition = nil
+    }
+    print("[AutoPhoto] \(enabled ? "✅ Enabled" : "❌ Disabled") — spacing: \(spacing)m")
+  }
+  
+  func exportAutoPhotos() -> [[String: Any]] {
+    return autoPhotoPaths
+  }
+  
+  func getAutoPhotoCount() -> Int {
+    return autoPhotoPaths.count
+  }
+  
+  // MARK: - AR Tape Visualization (walls, areas)
+  
+  private var tapeVisualizationNodes: [SCNNode] = []
+  
+  /// Extrude a wall from polyline points — creates vertical quad strips
+  func extrudeWall(points: [[String: Float]], height: Float, label: String) {
+    guard points.count >= 2 else { return }
+    
+    let container = SCNNode()
+    container.name = "tape_wall_\(label)"
+    
+    for i in 0..<(points.count - 1) {
+      let p1 = points[i]
+      let p2 = points[i + 1]
+      
+      let x1 = p1["x"] ?? 0, z1 = p1["z"] ?? 0
+      let x2 = p2["x"] ?? 0, z2 = p2["z"] ?? 0
+      let y = p1["y"] ?? 0
+      
+      // Create a quad (two triangles) for each wall segment
+      let vertices: [SCNVector3] = [
+        SCNVector3(x1, y, z1),           // bottom-left
+        SCNVector3(x2, y, z2),           // bottom-right
+        SCNVector3(x2, y + height, z2),  // top-right
+        SCNVector3(x1, y + height, z1),  // top-left
+      ]
+      
+      let indices: [Int32] = [0, 1, 2, 0, 2, 3] // two triangles
+      
+      let vertexSource = SCNGeometrySource(vertices: vertices)
+      let indexData = Data(bytes: indices, count: indices.count * MemoryLayout<Int32>.size)
+      let element = SCNGeometryElement(data: indexData, primitiveType: .triangles, primitiveCount: 2, bytesPerIndex: 4)
+      
+      let geometry = SCNGeometry(sources: [vertexSource], elements: [element])
+      
+      // Semi-transparent green material (both sides)
+      let material = SCNMaterial()
+      material.diffuse.contents = UIColor(red: 0.2, green: 0.85, blue: 0.4, alpha: 0.25)
+      material.emission.contents = UIColor(red: 0.2, green: 0.85, blue: 0.4, alpha: 0.1)
+      material.isDoubleSided = true
+      material.transparency = 0.25
+      material.blendMode = .add
+      geometry.materials = [material]
+      
+      let wallNode = SCNNode(geometry: geometry)
+      container.addChildNode(wallNode)
+      
+      // Edge line on top
+      let edgeVertices: [SCNVector3] = [
+        SCNVector3(x1, y + height, z1),
+        SCNVector3(x2, y + height, z2),
+      ]
+      let lineSource = SCNGeometrySource(vertices: edgeVertices)
+      let lineIndices: [Int32] = [0, 1]
+      let lineData = Data(bytes: lineIndices, count: lineIndices.count * MemoryLayout<Int32>.size)
+      let lineElement = SCNGeometryElement(data: lineData, primitiveType: .line, primitiveCount: 1, bytesPerIndex: 4)
+      let lineGeo = SCNGeometry(sources: [lineSource], elements: [lineElement])
+      let lineMat = SCNMaterial()
+      lineMat.diffuse.contents = UIColor(red: 0.2, green: 1.0, blue: 0.4, alpha: 0.8)
+      lineMat.emission.contents = UIColor.green
+      lineGeo.materials = [lineMat]
+      let lineNode = SCNNode(geometry: lineGeo)
+      container.addChildNode(lineNode)
+    }
+    
+    // Label at center top
+    if let firstP = points.first, let lastP = points.last {
+      let cx = ((firstP["x"] ?? 0) + (lastP["x"] ?? 0)) / 2
+      let cz = ((firstP["z"] ?? 0) + (lastP["z"] ?? 0)) / 2
+      let cy = (firstP["y"] ?? 0) + height + 0.1
+      
+      let text = SCNText(string: label, extrusionDepth: 0.005)
+      text.font = UIFont.boldSystemFont(ofSize: 0.08)
+      text.firstMaterial?.diffuse.contents = UIColor.green
+      text.firstMaterial?.emission.contents = UIColor.green
+      let textNode = SCNNode(geometry: text)
+      let (min, max) = textNode.boundingBox
+      textNode.position = SCNVector3(cx - (max.x - min.x)/2, cy, cz)
+      let billboard = SCNBillboardConstraint()
+      billboard.freeAxes = .Y
+      textNode.constraints = [billboard]
+      container.addChildNode(textNode)
+    }
+    
+    arView.scene.rootNode.addChildNode(container)
+    tapeVisualizationNodes.append(container)
+    
+    print("[TapeViz] 🧱 Wall extruded: \(points.count) segments, h=\(height)m, label=\(label)")
+  }
+  
+  /// Show a semi-transparent floor polygon for area measurement
+  func showAreaSurface(points: [[String: Float]], label: String) {
+    guard points.count >= 3 else { return }
+    
+    let container = SCNNode()
+    container.name = "tape_area_\(label)"
+    
+    // Fan triangulation from first point
+    var vertices: [SCNVector3] = points.map { p in
+      SCNVector3(p["x"] ?? 0, (p["y"] ?? 0) + 0.005, p["z"] ?? 0) // slightly above floor
+    }
+    
+    var indices: [Int32] = []
+    for i in 1..<(vertices.count - 1) {
+      indices.append(0)
+      indices.append(Int32(i))
+      indices.append(Int32(i + 1))
+    }
+    
+    let vertexSource = SCNGeometrySource(vertices: vertices)
+    let indexData = Data(bytes: indices, count: indices.count * MemoryLayout<Int32>.size)
+    let element = SCNGeometryElement(data: indexData, primitiveType: .triangles, primitiveCount: indices.count / 3, bytesPerIndex: 4)
+    
+    let geometry = SCNGeometry(sources: [vertexSource], elements: [element])
+    
+    let material = SCNMaterial()
+    material.diffuse.contents = UIColor(red: 0.3, green: 0.5, blue: 1.0, alpha: 0.2)
+    material.emission.contents = UIColor(red: 0.3, green: 0.5, blue: 1.0, alpha: 0.1)
+    material.isDoubleSided = true
+    material.transparency = 0.2
+    material.blendMode = .add
+    geometry.materials = [material]
+    
+    let surfaceNode = SCNNode(geometry: geometry)
+    container.addChildNode(surfaceNode)
+    
+    // Label at centroid
+    var cx: Float = 0, cy: Float = 0, cz: Float = 0
+    for p in points {
+      cx += p["x"] ?? 0
+      cy += p["y"] ?? 0
+      cz += p["z"] ?? 0
+    }
+    let n = Float(points.count)
+    cx /= n; cy /= n; cz /= n
+    
+    let text = SCNText(string: label, extrusionDepth: 0.005)
+    text.font = UIFont.boldSystemFont(ofSize: 0.06)
+    text.firstMaterial?.diffuse.contents = UIColor(red: 0.3, green: 0.5, blue: 1.0, alpha: 1.0)
+    text.firstMaterial?.emission.contents = UIColor.blue
+    let textNode = SCNNode(geometry: text)
+    let (min, max) = textNode.boundingBox
+    textNode.position = SCNVector3(cx - (max.x - min.x)/2, cy + 0.15, cz)
+    let billboard = SCNBillboardConstraint()
+    billboard.freeAxes = .Y
+    textNode.constraints = [billboard]
+    container.addChildNode(textNode)
+    
+    arView.scene.rootNode.addChildNode(container)
+    tapeVisualizationNodes.append(container)
+    
+    print("[TapeViz] ⬜ Area surface: \(points.count) vertices, label=\(label)")
+  }
+  
+  func clearTapeVisualizations() {
+    for node in tapeVisualizationNodes {
+      node.removeFromParentNode()
+    }
+    tapeVisualizationNodes = []
+  }
+  
+  // MARK: - Manual Anchor Placement & Matching for Multi-Session Alignment
+  
+  private var manualAnchors: [[String: Any]] = []        // Placed this session
+  private var manualAnchorNodes: [SCNNode] = []
+  private var matchingPreviousAnchors: [[String: Any]] = [] // From DB
+  private var matchingGhostNodes: [SCNNode] = []
+  private var matchedPositions: [SCNVector3] = []          // New positions for old anchors
+  private var matchedIndices: Set<Int> = []
+  
+  /// Place a numbered manual anchor at the cursor/crosshair position (raycast hit)
+  /// type: "point" = sphere marker for corners, "edge" = vertical line for wall edges
+  func placeManualAnchor(type anchorType: String = "point") -> [String: Any]? {
+    // Use crosshair position (same raycast as measurement points)
+    guard let cursorPosition = pointerNode?.position, !pointerNode!.isHidden else {
+      // Fallback: if no surface detected, try camera-based placement
+      guard let frame = arView.session.currentFrame else { return nil }
+      let camera = frame.camera.transform
+      // Place 2m in front of camera
+      let forward = SCNVector3(-camera.columns.2.x, -camera.columns.2.y, -camera.columns.2.z)
+      let pos = SCNVector3(camera.columns.3.x + forward.x * 2,
+                           camera.columns.3.y + forward.y * 2,
+                           camera.columns.3.z + forward.z * 2)
+      return createAnchorNode(at: pos, type: anchorType)
+    }
+    
+    return createAnchorNode(at: cursorPosition, type: anchorType)
+  }
+  
+  private func createAnchorNode(at position: SCNVector3, type anchorType: String) -> [String: Any] {
+    let index = manualAnchors.count + 1
+    let typeLabel = anchorType == "edge" ? "Hrana" : "Bod"
+    let name = "\(typeLabel) \(index)"
+    let anchorId = UUID().uuidString
+    
+    let anchor: [String: Any] = [
+      "id": anchorId,
+      "name": name,
+      "type": "manual",
+      "anchor_type": anchorType, // "point" or "edge"
+      "position_x": position.x,
+      "position_y": position.y,
+      "position_z": position.z,
+      "index": index
+    ]
+    manualAnchors.append(anchor)
+    
+    // Create visual marker
+    let container = SCNNode()
+    container.position = position
+    
+    if anchorType == "edge" {
+      // EDGE: vertical line with spheres at top and bottom
+      let edgeHeight: Float = ceilingY != nil ? (ceilingY! - (floorY ?? position.y)) : 2.5
+      let baseY = floorY ?? position.y
+      
+      // Vertical pole (full height)
+      let pole = SCNCylinder(radius: 0.012, height: CGFloat(edgeHeight))
+      pole.firstMaterial?.diffuse.contents = UIColor.red.withAlphaComponent(0.8)
+      pole.firstMaterial?.emission.contents = UIColor.red.withAlphaComponent(0.3)
+      let poleNode = SCNNode(geometry: pole)
+      poleNode.position = SCNVector3(0, baseY - position.y + edgeHeight / 2, 0)
+      container.addChildNode(poleNode)
+      
+      // Bottom sphere
+      let bottomSphere = SCNSphere(radius: 0.05)
+      bottomSphere.firstMaterial?.diffuse.contents = UIColor.red
+      bottomSphere.firstMaterial?.emission.contents = UIColor(red: 0.9, green: 0, blue: 0, alpha: 0.5)
+      let bottomNode = SCNNode(geometry: bottomSphere)
+      bottomNode.position = SCNVector3(0, baseY - position.y, 0)
+      container.addChildNode(bottomNode)
+      
+      // Top sphere
+      let topSphere = SCNSphere(radius: 0.05)
+      topSphere.firstMaterial?.diffuse.contents = UIColor.red
+      topSphere.firstMaterial?.emission.contents = UIColor(red: 0.9, green: 0, blue: 0, alpha: 0.5)
+      let topNode = SCNNode(geometry: topSphere)
+      topNode.position = SCNVector3(0, baseY - position.y + edgeHeight, 0)
+      container.addChildNode(topNode)
+      
+      // Pulse on top sphere
+      let pulse = CABasicAnimation(keyPath: "scale")
+      pulse.fromValue = NSValue(scnVector3: SCNVector3(1, 1, 1))
+      pulse.toValue = NSValue(scnVector3: SCNVector3(1.3, 1.3, 1.3))
+      pulse.duration = 0.6
+      pulse.autoreverses = true
+      pulse.repeatCount = .infinity
+      topNode.addAnimation(pulse, forKey: "pulse")
+    } else {
+      // POINT: red sphere at exact position
+      let sphere = SCNSphere(radius: 0.06)
+      sphere.firstMaterial?.diffuse.contents = UIColor.red
+      sphere.firstMaterial?.emission.contents = UIColor(red: 0.9, green: 0, blue: 0, alpha: 0.5)
+      let sphereNode = SCNNode(geometry: sphere)
+      container.addChildNode(sphereNode)
+      
+      // Pulse animation
+      let pulse = CABasicAnimation(keyPath: "scale")
+      pulse.fromValue = NSValue(scnVector3: SCNVector3(1, 1, 1))
+      pulse.toValue = NSValue(scnVector3: SCNVector3(1.2, 1.2, 1.2))
+      pulse.duration = 0.6
+      pulse.autoreverses = true
+      pulse.repeatCount = .infinity
+      sphereNode.addAnimation(pulse, forKey: "pulse")
+    }
+    
+    // Number label
+    let text = SCNText(string: "\(index)", extrusionDepth: 0.01)
+    text.font = UIFont.boldSystemFont(ofSize: 0.12)
+    text.firstMaterial?.diffuse.contents = UIColor.white
+    text.firstMaterial?.emission.contents = UIColor.red
+    let textNode = SCNNode(geometry: text)
+    let (min, max) = textNode.boundingBox
+    textNode.position = SCNVector3(-(max.x - min.x)/2, 0.08, 0)
+    let billboard = SCNBillboardConstraint()
+    billboard.freeAxes = .Y
+    textNode.constraints = [billboard]
+    container.addChildNode(textNode)
+    
+    arView.scene.rootNode.addChildNode(container)
+    manualAnchorNodes.append(container)
+    
+    // Also save to sceneAnchors for DB persistence
+    sceneAnchors.append(anchor)
+    
+    print("[ManualAnchor] ✅ Placed '\(name)' (\(anchorType)) at (\(String(format: "%.2f", position.x)), \(String(format: "%.2f", position.y)), \(String(format: "%.2f", position.z)))")
+    return anchor
+  }
+  
+  func getManualAnchorCount() -> Int {
+    return manualAnchors.count
+  }
+  
+  func getManualAnchors() -> [[String: Any]] {
+    return manualAnchors
+  }
+  
+  /// Start matching: show ghost markers from previous session
+  func startAnchorMatching(previousAnchors: [[String: Any]]) {
+    matchingPreviousAnchors = previousAnchors
+    matchedPositions = Array(repeating: SCNVector3Zero, count: previousAnchors.count)
+    matchedIndices = []
+    
+    // Show ghost markers (semi-transparent yellow)
+    for (i, anchor) in previousAnchors.enumerated() {
+      let px = (anchor["position_x"] as? Float) ?? 0
+      let py = (anchor["position_y"] as? Float) ?? 0
+      let pz = (anchor["position_z"] as? Float) ?? 0
+      let name = (anchor["name"] as? String) ?? "Kotva \(i+1)"
+      
+      let container = SCNNode()
+      // Place ghost at ORIGIN — user needs to walk there
+      container.position = SCNVector3(0, 0, 0) // hidden initially
+      container.isHidden = true
+      
+      // Yellow ghost sphere
+      let sphere = SCNSphere(radius: 0.08)
+      sphere.firstMaterial?.diffuse.contents = UIColor.yellow.withAlphaComponent(0.4)
+      sphere.firstMaterial?.emission.contents = UIColor.yellow.withAlphaComponent(0.2)
+      let sphereNode = SCNNode(geometry: sphere)
+      container.addChildNode(sphereNode)
+      
+      // Number label
+      let text = SCNText(string: "\(i+1) — \(name)", extrusionDepth: 0.01)
+      text.font = UIFont.boldSystemFont(ofSize: 0.1)
+      text.firstMaterial?.diffuse.contents = UIColor.yellow
+      let textNode = SCNNode(geometry: text)
+      let (min, max) = textNode.boundingBox
+      textNode.position = SCNVector3(-(max.x - min.x)/2, 0.12, 0)
+      let billboard = SCNBillboardConstraint()
+      billboard.freeAxes = .Y
+      textNode.constraints = [billboard]
+      container.addChildNode(textNode)
+      
+      arView.scene.rootNode.addChildNode(container)
+      matchingGhostNodes.append(container)
+    }
+    
+    print("[Matching] Started with \(previousAnchors.count) previous anchors to match")
+  }
+  
+  /// Match current crosshair position to a previous anchor by index
+  func matchAnchor(index: Int) -> Bool {
+    guard index >= 0 && index < matchingPreviousAnchors.count else { return false }
+    
+    // Use crosshair position if available, fallback to camera
+    let newPos: SCNVector3
+    if let cursorPos = pointerNode?.position, !pointerNode!.isHidden {
+      newPos = cursorPos
+    } else {
+      guard let frame = arView.session.currentFrame else { return false }
+      let camera = frame.camera.transform
+      newPos = SCNVector3(camera.columns.3.x, 0, camera.columns.3.z)
+    }
+    
+    matchedPositions[index] = newPos
+    matchedIndices.insert(index)
+    
+    // Show matched marker (solid green at new position)
+    if index < matchingGhostNodes.count {
+      let ghost = matchingGhostNodes[index]
+      ghost.position = newPos
+      ghost.isHidden = false
+      // Change color to green (matched!)
+      ghost.enumerateChildNodes { child, _ in
+        if let geo = child.geometry as? SCNSphere {
+          geo.firstMaterial?.diffuse.contents = UIColor.green
+          geo.firstMaterial?.emission.contents = UIColor.green.withAlphaComponent(0.5)
+        }
+        if let tGeo = child.geometry as? SCNText {
+          tGeo.firstMaterial?.diffuse.contents = UIColor.green
+        }
+      }
+    }
+    
+    let name = (matchingPreviousAnchors[index]["name"] as? String) ?? "Kotva \(index+1)"
+    print("[Matching] ✅ Matched '\(name)' at (\(String(format: "%.2f", newPos.x)), \(String(format: "%.2f", newPos.z))) — \(matchedIndices.count)/\(matchingPreviousAnchors.count)")
+    return true
+  }
+  
+  func getMatchedCount() -> Int {
+    return matchedIndices.count
+  }
+  
+  /// Compute Kabsch rigid body transform (rotation + translation)
+  /// Returns 4x4 transform matrix as flat Float array, or nil if not enough matches
+  func computeKabschTransform() -> [Float]? {
+    guard matchedIndices.count >= 3 else {
+      print("[Kabsch] Need at least 3 matched anchors, have \(matchedIndices.count)")
+      return nil
+    }
+    
+    let indices = Array(matchedIndices).sorted()
+    
+    // Collect old (previous session) and new (current session) positions
+    var oldPoints: [simd_float3] = []
+    var newPoints: [simd_float3] = []
+    
+    for i in indices {
+      let anchor = matchingPreviousAnchors[i]
+      let ox = (anchor["position_x"] as? Float) ?? 0
+      let oy = (anchor["position_y"] as? Float) ?? 0
+      let oz = (anchor["position_z"] as? Float) ?? 0
+      oldPoints.append(simd_float3(ox, oy, oz))
+      
+      let np = matchedPositions[i]
+      newPoints.append(simd_float3(np.x, np.y, np.z))
+    }
+    
+    // Compute centroids
+    var centroidOld = simd_float3(0, 0, 0)
+    var centroidNew = simd_float3(0, 0, 0)
+    let n = Float(oldPoints.count)
+    
+    for i in 0..<oldPoints.count {
+      centroidOld += oldPoints[i]
+      centroidNew += newPoints[i]
+    }
+    centroidOld /= n
+    centroidNew /= n
+    
+    // Center the points
+    var centeredOld: [simd_float3] = []
+    var centeredNew: [simd_float3] = []
+    for i in 0..<oldPoints.count {
+      centeredOld.append(oldPoints[i] - centroidOld)
+      centeredNew.append(newPoints[i] - centroidNew)
+    }
+    
+    // Compute cross-covariance matrix H = sum(new_i * old_i^T)
+    // For 2D floor alignment (Y is constant), we use XZ plane
+    var h00: Float = 0, h01: Float = 0
+    var h10: Float = 0, h11: Float = 0
+    
+    for i in 0..<centeredOld.count {
+      h00 += centeredNew[i].x * centeredOld[i].x
+      h01 += centeredNew[i].x * centeredOld[i].z
+      h10 += centeredNew[i].z * centeredOld[i].x
+      h11 += centeredNew[i].z * centeredOld[i].z
+    }
+    
+    // 2D rotation angle via atan2
+    let angle = atan2(h10 - h01, h00 + h11)
+    let cosA = cos(angle)
+    let sinA = sin(angle)
+    
+    // Translation: t = centroid_new - R * centroid_old
+    let tx = centroidNew.x - (cosA * centroidOld.x - sinA * centroidOld.z)
+    let tz = centroidNew.z - (sinA * centroidOld.x + cosA * centroidOld.z)
+    let ty = centroidNew.y - centroidOld.y
+    
+    // Build 4x4 transform matrix (column-major for SceneKit/ARKit)
+    let transform: [Float] = [
+       cosA,  0, sinA, 0,  // column 0
+       0,     1, 0,    0,  // column 1
+      -sinA,  0, cosA, 0,  // column 2
+       tx,   ty, tz,   1   // column 3
+    ]
+    
+    // Compute alignment error (RMSE)
+    var totalError: Float = 0
+    for i in 0..<oldPoints.count {
+      let rotatedX = cosA * centeredOld[i].x - sinA * centeredOld[i].z
+      let rotatedZ = sinA * centeredOld[i].x + cosA * centeredOld[i].z
+      let errX = centeredNew[i].x - rotatedX
+      let errZ = centeredNew[i].z - rotatedZ
+      totalError += errX * errX + errZ * errZ
+    }
+    let rmse = sqrt(totalError / n)
+    
+    print("[Kabsch] ✅ Transform computed! Angle: \(String(format: "%.1f", angle * 180 / .pi))° Translation: (\(String(format: "%.2f", tx)), \(String(format: "%.2f", tz))) RMSE: \(String(format: "%.3f", rmse))m")
+    
+    return transform
+  }
+  
+  func clearMatchingState() {
+    for node in matchingGhostNodes {
+      node.removeFromParentNode()
+    }
+    matchingGhostNodes = []
+    matchingPreviousAnchors = []
+    matchedPositions = []
+    matchedIndices = []
+    manualAnchors = []
+    for node in manualAnchorNodes {
+      node.removeFromParentNode()
+    }
+    manualAnchorNodes = []
+  }
 
   func session(_ session: ARSession, didFailWithError error: Error) {
     print("[ARKit] Session failed: \(error.localizedDescription)")
@@ -2254,7 +3131,7 @@ extension UIColor {
 }
 
 @available(iOS 16.0, *)
-class RoomPlanController: NSObject, RoomCaptureSessionDelegate {
+class RoomPlanController: NSObject, RoomCaptureSessionDelegate, NSCoding {
     var session: RoomCaptureSession?
     var latestRoom: CapturedRoom?
     var finalizedRoom: CapturedRoom?  // Post-processed by RoomBuilder
@@ -2262,16 +3139,25 @@ class RoomPlanController: NSObject, RoomCaptureSessionDelegate {
     var isFinalized: Bool = false
     weak var sceneView: ARSCNView?
     
+    // NSCoding conformance (required for RoomCaptureViewDelegate at iOS 17+)
+    required init?(coder: NSCoder) { super.init() }
+    func encode(with coder: NSCoder) {}
+    override init() { super.init() }
+    
+    // RoomCaptureView overlay (stored as UIView for iOS 16 compat)
+    var roomCaptureViewRef: UIView?
+    
     // Inferred ceiling
     var inferredCeilingY: Float?
     var inferredFloorY: Float?
     
-    // Nodes for real-time rendering
-    private var roomNodes: [SCNNode] = []
+    // Nodes for real-time rendering (fallback for iOS 16)
+    private var roomNodes: [SCNNode] = []           // Current scan (cleared during live updates)
+    private var persistentRoomNodes: [SCNNode] = []  // Previous scans (never cleared by live updates)
     private let roomRootNode = SCNNode()
     var isVisible: Bool = true
     
-    // Polycam-style colors — subtle fills, bright wireframe edges
+    // Edge colors for fallback SceneKit rendering (iOS 16)
     private let wallColor = UIColor(red: 0.4, green: 0.6, blue: 1.0, alpha: 0.08)
     private let doorColor = UIColor(red: 1.0, green: 0.65, blue: 0.1, alpha: 0.1)
     private let windowColor = UIColor(red: 0.0, green: 0.95, blue: 1.0, alpha: 0.1)
@@ -2279,8 +3165,6 @@ class RoomPlanController: NSObject, RoomCaptureSessionDelegate {
     private let openingColor = UIColor(red: 0.9, green: 0.9, blue: 0.0, alpha: 0.08)
     private let objectColor = UIColor(red: 1.0, green: 0.4, blue: 1.0, alpha: 0.08)
     private let ceilingColor = UIColor(red: 0.7, green: 0.7, blue: 0.9, alpha: 0.05)
-    
-    // Edge colors — bright and visible
     private let wallEdgeColor = UIColor(red: 0.5, green: 0.7, blue: 1.0, alpha: 1.0)
     private let doorEdgeColor = UIColor(red: 1.0, green: 0.7, blue: 0.2, alpha: 1.0)
     private let windowEdgeColor = UIColor(red: 0.0, green: 1.0, blue: 1.0, alpha: 1.0)
@@ -2289,30 +3173,51 @@ class RoomPlanController: NSObject, RoomCaptureSessionDelegate {
     private let objectEdgeColor = UIColor.white
     private let ceilingEdgeColor = UIColor(red: 0.8, green: 0.8, blue: 1.0, alpha: 0.8)
     
+    // startWithCaptureView is in iOS 17+ extension below
+    
+    // MARK: - Start session-only (iOS 16 fallback)
+    
     func start(arSession: ARSession) {
+        let config = RoomCaptureSession.Configuration()
         if #available(iOS 17.0, *) {
-            let config = RoomCaptureSession.Configuration()
             session = RoomCaptureSession(arSession: arSession)
-            session?.delegate = self
-            session?.run(configuration: config)
-            isFinalized = false
-            finalizedRoom = nil
-            capturedRoomData = nil
-            // Add root node to scene
-            sceneView?.scene.rootNode.addChildNode(roomRootNode)
-            print("[RoomPlan] Session started")
+        } else {
+            session = RoomCaptureSession()
         }
+        session?.delegate = self
+        session?.run(configuration: config)
+        isFinalized = false
+        finalizedRoom = nil
+        capturedRoomData = nil
+        sceneView?.scene.rootNode.addChildNode(roomRootNode)
+        print("[RoomPlan] Session started (no overlay)")
+    }
+    
+    // MARK: - Stop and remove overlay
+    
+    func stopAndRemoveOverlay() {
+        session?.stop()
+        // Remove RoomCaptureView overlay
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.roomCaptureViewRef?.removeFromSuperview()
+            self?.roomCaptureViewRef = nil
+        }
+        print("[RoomPlan] Session stopped, removing overlay...")
     }
     
     func stop() {
         session?.stop()
-        // Don't remove visualization — keep it visible
         print("[RoomPlan] Session stopped, waiting for finalization...")
     }
+    
+    // RoomCaptureViewDelegate methods are in iOS 17+ extension below
+    
+    // MARK: - RoomCaptureSessionDelegate
     
     func captureSession(_ session: RoomCaptureSession, didUpdate room: CapturedRoom) {
         self.latestRoom = room
         inferCeilingAndFloor(from: room)
+        // Re-enabled: render RoomPlan data in SceneKit (shared AR session = correct coords)
         DispatchQueue.main.async { [weak self] in
             self?.updateARVisualization(room: room)
         }
@@ -2324,7 +3229,6 @@ class RoomPlanController: NSObject, RoomCaptureSessionDelegate {
         } else {
             print("[RoomPlan] Session ended, storing CapturedRoomData for finalization")
             self.capturedRoomData = data
-            // Auto-finalize
             finalizeRoom()
         }
     }
@@ -2346,11 +3250,25 @@ class RoomPlanController: NSObject, RoomCaptureSessionDelegate {
                 
                 await MainActor.run {
                     self.finalizedRoom = finalRoom
-                    self.latestRoom = finalRoom  // Override preview with clean version
+                    self.latestRoom = finalRoom
                     self.isFinalized = true
                     self.inferCeilingAndFloor(from: finalRoom)
+                    
+                    // Move current live nodes to persistent (they survive future scans)
+                    self.persistentRoomNodes.append(contentsOf: self.roomNodes)
+                    self.roomNodes.removeAll()
+                    
+                    // Re-render with finalized data (adds to scene as new roomNodes)
                     self.updateARVisualization(room: finalRoom)
-                    print("[RoomPlan] ✅ Finalized! Walls:\(finalRoom.walls.count) Doors:\(finalRoom.doors.count) Win:\(finalRoom.windows.count) Obj:\(finalRoom.objects.count)")
+                    
+                    // Move finalized nodes to persistent too
+                    self.persistentRoomNodes.append(contentsOf: self.roomNodes)
+                    self.roomNodes.removeAll()
+                    
+                    // Auto-create scene anchors at wall corners
+                    self.autoPlaceWallCornerAnchors(room: finalRoom)
+                    
+                    print("[RoomPlan] ✅ Finalized! Walls:\(finalRoom.walls.count) Doors:\(finalRoom.doors.count) Win:\(finalRoom.windows.count) Obj:\(finalRoom.objects.count) Persistent:\(self.persistentRoomNodes.count)")
                 }
             } catch {
                 print("[RoomPlan] ❌ RoomBuilder error: \(error.localizedDescription)")
@@ -2379,77 +3297,116 @@ class RoomPlanController: NSObject, RoomCaptureSessionDelegate {
         inferredFloorY = minY
     }
     
-    // MARK: - Real-time AR Visualization
+    // MARK: - Auto-Place Anchors at Wall Corners
+    
+    private func autoPlaceWallCornerAnchors(room: CapturedRoom) {
+        guard let view = sceneView?.superview as? ARRulerNativeView else { return }
+        
+        // Extract wall endpoints (corners) from transform + dimensions
+        var cornerPoints: [SCNVector3] = []
+        
+        for wall in room.walls {
+            let pos = wall.transform.columns.3
+            let halfW = wall.dimensions.x / 2
+            
+            // Wall local X axis (width direction)
+            let xAxis = simd_float3(wall.transform.columns.0.x, wall.transform.columns.0.y, wall.transform.columns.0.z)
+            let normalizedX = simd_normalize(xAxis)
+            
+            // Two endpoints of the wall (at floor level)
+            let floorY = pos.y - wall.dimensions.y / 2
+            let p1 = SCNVector3(
+                pos.x + normalizedX.x * halfW,
+                floorY,
+                pos.z + normalizedX.z * halfW
+            )
+            let p2 = SCNVector3(
+                pos.x - normalizedX.x * halfW,
+                floorY,
+                pos.z - normalizedX.z * halfW
+            )
+            cornerPoints.append(p1)
+            cornerPoints.append(p2)
+        }
+        
+        // Deduplicate corners within 30cm radius
+        var uniqueCorners: [SCNVector3] = []
+        for pt in cornerPoints {
+            let isDuplicate = uniqueCorners.contains { existing in
+                let dx = existing.x - pt.x
+                let dz = existing.z - pt.z
+                return sqrt(dx*dx + dz*dz) < 0.3
+            }
+            if !isDuplicate {
+                uniqueCorners.append(pt)
+            }
+        }
+        
+        // Create anchors at corner positions
+        var addedCount = 0
+        for (i, corner) in uniqueCorners.enumerated() {
+            let anchorId = UUID().uuidString
+            let anchor: [String: Any] = [
+                "id": anchorId,
+                "name": "Corner \(i + 1)",
+                "type": "roomplan_corner",
+                "position_x": corner.x,
+                "position_y": corner.y,
+                "position_z": corner.z,
+                "rotation_x": Float(0),
+                "rotation_y": Float(0),
+                "rotation_z": Float(0)
+            ]
+            view.sceneAnchors.append(anchor)
+            
+            let markerNode = view.createAnchorMarker(
+                position: corner,
+                name: "Corner \(i + 1)",
+                type: "roomplan_corner"
+            )
+            view.arView.scene.rootNode.addChildNode(markerNode)
+            view.sceneAnchorNodes.append(markerNode)
+            addedCount += 1
+        }
+        
+        print("[RoomPlan] Auto-placed \(addedCount) corner anchors from \(room.walls.count) walls")
+    }
+    
+    // MARK: - Real-time AR Visualization (fallback for iOS 16 / post-scan)
     
     private func updateARVisualization(room: CapturedRoom) {
-        // Clear old nodes
         for node in roomNodes {
             node.removeFromParentNode()
         }
         roomNodes.removeAll()
         
-        // Render walls
         for wall in room.walls {
-            let node = createBoxNode(
-                dimensions: wall.dimensions,
-                transform: wall.transform,
-                color: wallColor,
-                edgeColor: wallEdgeColor,
-                label: "Wall"
-            )
+            let node = createBoxNode(dimensions: wall.dimensions, transform: wall.transform, color: wallColor, edgeColor: wallEdgeColor, label: "Wall")
             roomRootNode.addChildNode(node)
             roomNodes.append(node)
         }
         
-        // Render doors
         for door in room.doors {
-            let node = createBoxNode(
-                dimensions: door.dimensions,
-                transform: door.transform,
-                color: doorColor,
-                edgeColor: doorEdgeColor,
-                label: "Door"
-            )
+            let node = createBoxNode(dimensions: door.dimensions, transform: door.transform, color: doorColor, edgeColor: doorEdgeColor, label: "Door")
             roomRootNode.addChildNode(node)
             roomNodes.append(node)
         }
         
-        // Render windows
         for window in room.windows {
-            let node = createBoxNode(
-                dimensions: window.dimensions,
-                transform: window.transform,
-                color: windowColor,
-                edgeColor: windowEdgeColor,
-                label: "Window"
-            )
+            let node = createBoxNode(dimensions: window.dimensions, transform: window.transform, color: windowColor, edgeColor: windowEdgeColor, label: "Window")
             roomRootNode.addChildNode(node)
             roomNodes.append(node)
         }
         
-        // Render openings
         for opening in room.openings {
-            let node = createBoxNode(
-                dimensions: opening.dimensions,
-                transform: opening.transform,
-                color: openingColor,
-                edgeColor: openingEdgeColor,
-                label: "Opening"
-            )
+            let node = createBoxNode(dimensions: opening.dimensions, transform: opening.transform, color: openingColor, edgeColor: openingEdgeColor, label: "Opening")
             roomRootNode.addChildNode(node)
             roomNodes.append(node)
         }
         
-        // Render floors (iOS 17+)
         if #available(iOS 17.0, *) {
             for floor in room.floors {
-                let node = createBoxNode(
-                    dimensions: floor.dimensions,
-                    transform: floor.transform,
-                    color: floorColor,
-                    edgeColor: floorEdgeColor,
-                    label: "Floor"
-                )
+                let node = createBoxNode(dimensions: floor.dimensions, transform: floor.transform, color: floorColor, edgeColor: floorEdgeColor, label: "Floor")
                 roomRootNode.addChildNode(node)
                 roomNodes.append(node)
             }
@@ -2663,5 +3620,133 @@ class RoomPlanController: NSObject, RoomCaptureSessionDelegate {
                 transform.columns.3.x, transform.columns.3.y, transform.columns.3.z, transform.columns.3.w
             ]
         ]
+    }
+    
+    // MARK: - Per-Element Export (for UUID-based DB persistence)
+    
+    func exportRoomPlanElements() -> [[String: Any]] {
+        guard let room = latestRoom else { return [] }
+        
+        var elements: [[String: Any]] = []
+        
+        // Walls
+        for wall in room.walls {
+            elements.append(elementToDict(id: wall.identifier, category: "wall", subcategory: nil, 
+                                          dimensions: wall.dimensions, transform: wall.transform))
+        }
+        
+        // Doors
+        for door in room.doors {
+            elements.append(elementToDict(id: door.identifier, category: "door", subcategory: nil,
+                                          dimensions: door.dimensions, transform: door.transform))
+        }
+        
+        // Windows
+        for window in room.windows {
+            elements.append(elementToDict(id: window.identifier, category: "window", subcategory: nil,
+                                          dimensions: window.dimensions, transform: window.transform))
+        }
+        
+        // Openings
+        for opening in room.openings {
+            elements.append(elementToDict(id: opening.identifier, category: "opening", subcategory: nil,
+                                          dimensions: opening.dimensions, transform: opening.transform))
+        }
+        
+        // Floors
+        if #available(iOS 17.0, *) {
+            for floor in room.floors {
+                elements.append(elementToDict(id: floor.identifier, category: "floor", subcategory: nil,
+                                              dimensions: floor.dimensions, transform: floor.transform))
+            }
+        }
+        
+        // Objects (furniture)
+        for obj in room.objects {
+            var subcategory = "unknown"
+            switch obj.category {
+            case .chair: subcategory = "chair"
+            case .table: subcategory = "table"
+            case .sofa: subcategory = "sofa"
+            case .bed: subcategory = "bed"
+            case .storage: subcategory = "storage"
+            case .refrigerator: subcategory = "refrigerator"
+            case .stove: subcategory = "stove"
+            case .oven: subcategory = "oven"
+            case .sink: subcategory = "sink"
+            case .washerDryer: subcategory = "washerDryer"
+            case .toilet: subcategory = "toilet"
+            case .bathtub: subcategory = "bathtub"
+            case .television: subcategory = "television"
+            case .fireplace: subcategory = "fireplace"
+            case .dishwasher: subcategory = "dishwasher"
+            case .stairs: subcategory = "stairs"
+            default: subcategory = "unknown"
+            }
+            elements.append(elementToDict(id: obj.identifier, category: "object", subcategory: subcategory,
+                                          dimensions: obj.dimensions, transform: obj.transform))
+        }
+        
+        return elements
+    }
+    
+    private func elementToDict(id: UUID, category: String, subcategory: String?,
+                                dimensions: simd_float3, transform: simd_float4x4) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": id.uuidString,
+            "category": category,
+            "dimensions": ["width": dimensions.x, "height": dimensions.y, "depth": dimensions.z],
+            "transform": [
+                transform.columns.0.x, transform.columns.0.y, transform.columns.0.z, transform.columns.0.w,
+                transform.columns.1.x, transform.columns.1.y, transform.columns.1.z, transform.columns.1.w,
+                transform.columns.2.x, transform.columns.2.y, transform.columns.2.z, transform.columns.2.w,
+                transform.columns.3.x, transform.columns.3.y, transform.columns.3.z, transform.columns.3.w
+            ],
+            "is_finalized": isFinalized
+        ]
+        if let sub = subcategory {
+            dict["subcategory"] = sub
+        }
+        return dict
+    }
+}
+
+// MARK: - iOS 17+ Extension: RoomCaptureView support
+@available(iOS 17.0, *)
+extension RoomPlanController: RoomCaptureViewDelegate {
+    // MARK: - Start with RoomCaptureView overlay
+    
+    func startWithCaptureView(parentView: UIView, arSession: ARSession) {
+        isFinalized = false
+        finalizedRoom = nil
+        capturedRoomData = nil
+        
+        let rcView = RoomCaptureView(frame: parentView.bounds)
+        rcView.captureSession.delegate = self
+        rcView.delegate = self
+        rcView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        rcView.tag = 999  // For easy removal
+        parentView.addSubview(rcView)
+        
+        let config = RoomCaptureSession.Configuration()
+        rcView.captureSession.run(configuration: config)
+        self.session = rcView.captureSession
+        self.roomCaptureViewRef = rcView
+        
+        print("[RoomPlan] RoomCaptureView overlay started")
+    }
+    
+    // MARK: - RoomCaptureViewDelegate
+    
+    func captureView(shouldPresent roomDataForProcessing: CapturedRoomData, error: Error?) -> Bool {
+        // Return false to skip Apple's post-scan preview (we handle our own)
+        return false
+    }
+    
+    func captureView(didPresent processedResult: CapturedRoom, error: Error?) {
+        // Only called if shouldPresent returns true
+        self.finalizedRoom = processedResult
+        self.latestRoom = processedResult
+        self.isFinalized = true
     }
 }

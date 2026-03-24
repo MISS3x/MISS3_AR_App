@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Room - ./testik.glb</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: sans-serif; background-color: #bbbbbb; }
+        #canvas-container { width: 100vw; height: 100vh; display: block; }
+        .btn {
+            position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+            padding: 10px 20px; background: rgba(0,0,0,0.6); color: white;
+            border: 1px solid rgba(255,255,255,0.3); border-radius: 20px;
+            cursor: pointer; font-size: 14px; backdrop-filter: blur(5px);
+            display: flex; align-items: center; gap: 8px; z-index: 10;
+        }
+        .btn:hover { background: rgba(0,0,0,0.8); }
+        
+        #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: white; font-family: monospace; background: rgba(0,0,0,0.5); padding: 10px 20px; border-radius: 8px; pointer-events: none; transition: opacity 0.5s; }
+        
+        .annotation {
+            position: absolute;
+            width: 20px; height: 20px;
+            border-radius: 50%;
+            border: 2px solid white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+            cursor: pointer;
+            transition: transform 0.2s;
+            z-index: 5;
+        }
+        .annotation:hover { transform: scale(1.2); }
+        
+        #anno-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; justify-content: center; align-items: center; z-index: 20; }
+        #anno-content { background: white; padding: 20px; border-radius: 12px; max-width: 300px; pointer-events: auto; box-shadow: 0 10px 25px rgba(0,0,0,0.2); text-align: center; border-top: 5px solid #3b82f6; animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        #anno-close { margin-top: 10px; padding: 6px 12px; background: #eee; border: none; border-radius: 4px; cursor: pointer; }
+        @keyframes popIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    </style>
+    <!-- Import Maps Polyfill -->
+    <script async src="https://unpkg.com/es-module-shims@1.8.0/dist/es-module-shims.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+      }
+    </script>
+</head>
+<body>
+    <div id="loading">Loading Model...</div>
+    <div id="canvas-container"></div>
+    
+    <!-- UI -->
+    <div id="ui-layer">
+        <button id="switch-btn" class="btn" onclick="window.location.href = 'index.html'">
+            🏠 Home
+        </button>
+    </div>
+
+    <!-- Annotation Modal -->
+    <div id="anno-overlay">
+        <div id="anno-content">
+            <div id="anno-text"></div>
+            <button id="anno-close" onclick="closeAnno()">Close</button>
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+        import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
+        import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+        import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+
+        // Config
+        const MODEL_URL = './testik.glb';
+        const ANNOTATIONS = [{"text":"ascsdS","pos":{"x":0.7016519032027402,"y":0.6723459890591112,"z":0.04944164539126123},"dotColor":"#ffffff","frameColor":"#ffffff"}];
+        
+        // Globals
+        let camera, scene, renderer, controls;
+        let model;
+        const annotations = []; 
+
+        init();
+        animate();
+
+        function init() {
+            const container = document.getElementById('canvas-container');
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.outputColorSpace = THREE.SRGBColorSpace;
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 1;
+            container.appendChild(renderer.domElement);
+
+            // Scene 
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xbbbbbb);
+            
+            const environment = new RoomEnvironment(renderer);
+            const pmremGenerator = new THREE.PMREMGenerator(renderer);
+            scene.environment = pmremGenerator.fromScene(environment).texture;
+            
+            // Grid
+            const grid = new THREE.GridHelper(500, 10, 0xffffff, 0xffffff);
+            grid.material.opacity = 0.5;
+            grid.material.depthWrite = false;
+            grid.material.transparent = true;
+            scene.add(grid);
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 2000);
+            camera.position.set(0, 100, 0);
+
+            // Controls
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.minDistance = 1; 
+            controls.maxDistance = 1000;
+            controls.target.set(0, 0, 0);
+            
+            // Auto Orbit
+            controls.autoRotate = true;
+            controls.autoRotateSpeed = 1.0; // Gentle spin
+
+            // Loaders
+            const ktx2Loader = new KTX2Loader()
+                .setTranscoderPath('https://unpkg.com/three@0.160.0/examples/jsm/libs/basis/')
+                .detectSupport(renderer);
+
+            const dracoLoader = new DRACOLoader();
+            dracoLoader.setDecoderPath('https://unpkg.com/three@0.160.0/examples/jsm/libs/draco/gltf/');
+
+            const loader = new GLTFLoader();
+            loader.setKTX2Loader(ktx2Loader);
+            loader.setDRACOLoader(dracoLoader);
+            loader.setMeshoptDecoder(MeshoptDecoder);
+
+            loader.load(MODEL_URL, function (gltf) {
+                model = gltf.scene;
+                scene.add(model);
+                
+                // Fit Camera
+                fitCameraToSelection(camera, controls, [model]);
+                
+                document.getElementById('loading').style.opacity = 0;
+                initAnnotations();
+
+            }, undefined, function (error) {
+                console.error(error);
+                document.getElementById('loading').innerText = "Error loading model";
+            });
+
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function fitCameraToSelection(camera, controls, selection, fitOffset = 1.2) {
+             const box = new THREE.Box3();
+            for(const object of selection) box.expandByObject(object);
+            
+            if (box.isEmpty()) return;
+
+            const size = box.getSize(new THREE.Vector3());
+            const center = box.getCenter(new THREE.Vector3());
+            
+            selection[0].position.sub(center); 
+            selection[0].position.y += size.y / 2; // Floor it
+            
+            const maxSize = Math.max(size.x, size.y, size.z);
+            const fitHeightDistance = maxSize / (2 * Math.atan(Math.PI * camera.fov / 360));
+            const fitWidthDistance = fitHeightDistance / camera.aspect;
+            const distance = fitOffset * Math.max(fitHeightDistance, fitWidthDistance);
+            
+            controls.target.copy(new THREE.Vector3(0, size.y/2, 0));
+            
+            camera.near = distance / 100;
+            camera.far = distance * 100;
+            camera.updateProjectionMatrix();
+            camera.position.set(distance, distance * 0.8, distance);
+            camera.lookAt(controls.target);
+            controls.maxDistance = distance * 5;
+        }
+
+        function initAnnotations() {
+            const container = document.body; 
+            ANNOTATIONS.forEach((data, index) => {
+                const el = document.createElement('div');
+                el.className = 'annotation';
+                el.style.backgroundColor = data.dotColor;
+                el.innerHTML = index + 1;
+                el.style.display = 'flex';
+                el.style.alignItems = 'center';
+                el.style.justifyContent = 'center';
+                el.style.color = new THREE.Color(data.dotColor).getHSL({}).l > 0.5 ? 'black' : 'white';
+                el.style.fontWeight = 'bold';
+                el.style.fontSize = '12px';
+                el.onclick = () => showAnno(data);
+                container.appendChild(el);
+                
+                const anchor = new THREE.Object3D();
+                anchor.position.set(data.pos.x, data.pos.y, data.pos.z);
+                model.add(anchor);
+                
+                annotations.push({ el: el, anchor: anchor });
+            });
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update(); // Required for Damping + AutoRotate
+            renderer.render(scene, camera);
+            
+            // Annotations
+            if(annotations.length > 0) {
+                const tempV = new THREE.Vector3();
+                annotations.forEach(anno => {
+                    anno.anchor.getWorldPosition(tempV);
+                    tempV.project(camera);
+                    const x = (tempV.x * .5 + .5) * window.innerWidth;
+                    const y = (tempV.y * -.5 + .5) * window.innerHeight;
+                    
+                     if(tempV.z > 1 || Math.abs(x) > window.innerWidth || Math.abs(y) > window.innerHeight) {
+                         anno.el.style.display = 'none';
+                    } else {
+                         anno.el.style.display = 'flex';
+                         anno.el.style.left = x + 'px';
+                         anno.el.style.top = y + 'px';
+                    }
+                });
+            }
+        }
+        
+        window.closeAnno = () => { document.getElementById('anno-overlay').style.display = 'none'; }
+        window.showAnno = (data) => {
+             const overlay = document.getElementById('anno-overlay');
+             const text = document.getElementById('anno-text');
+             try { text.innerText = decodeURIComponent(data.text); } catch(e) { text.innerText = data.text; }
+             document.getElementById('anno-content').style.borderColor = data.frameColor;
+             overlay.style.display = 'flex';
+        }
+    </script>
+</body>
+</html>

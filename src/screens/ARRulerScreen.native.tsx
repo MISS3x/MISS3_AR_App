@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, Modal, TextInput, ActivityIndicator, Switch, FlatList, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 // SegmentedControl removed — mode buttons are now inline with + button
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, spacing, borderRadius, typography, shadows } from '../theme/theme';
@@ -70,6 +71,16 @@ export default function ARRulerScreen({ navigation }: any) {
   // Room scan state
   const [isRoomScanning, setIsRoomScanning] = useState(false);
   const [isRoomFinalizing, setIsRoomFinalizing] = useState(false);
+  const [scanSessionNumber, setScanSessionNumber] = useState(0); // counts scan sessions
+  const [meshExportEnabled, setMeshExportEnabled] = useState(true); // toggle mesh export
+  const [isPlacingAnchors, setIsPlacingAnchors] = useState(false);
+  const [anchorType, setAnchorType] = useState<'point' | 'edge'>('edge');
+  const [anchorCount, setAnchorCount] = useState(0);
+  const anchorResolveRef = useRef<(() => void) | null>(null); // resolve when anchor placed
+  const [isMatchingAnchors, setIsMatchingAnchors] = useState(false);
+  const [matchCount, setMatchCount] = useState(0);
+  const [previousAnchors, setPreviousAnchors] = useState<any[]>([]);
+  const [sessionTransform, setSessionTransform] = useState<number[] | null>(null);
   // Per-category logs
   const [logsM, setLogsM] = useState<string[]>([]); // measurements
   const [logsB, setLogsB] = useState<string[]>([]); // bounding boxes
@@ -180,7 +191,16 @@ export default function ARRulerScreen({ navigation }: any) {
         measurementsData.forEach(d => {
           const pType = d.payload?.type;
           const pts = d.payload?.points;
-          if (pts && Array.isArray(pts) && pts.length >= 2) {
+          
+          // Handle web primitives (cube, cylinder, sphere) — have position, not points
+          if (['cube', 'cylinder', 'sphere'].includes(pType) && d.payload?.position) {
+            allRemoteObjects.push({
+              type: pType,
+              position: d.payload.position,
+              rotation: d.payload.rotation || { x: 0, y: 0, z: 0 },
+              scale: d.payload.scale || { x: 1, y: 1, z: 1 }
+            });
+          } else if (pts && Array.isArray(pts) && pts.length >= 2) {
             // Map any type to polygon/polyline for native rendering
             const renderType = (pType === 'polygon' || pType === 'floor' || pType === 'wall') ? 'polygon' : 'polyline';
             allRemoteObjects.push({
@@ -195,15 +215,7 @@ export default function ARRulerScreen({ navigation }: any) {
       console.log(`[AR Collab] Sending ${allRemoteObjects.length} remote objects to native`);
       rulerRef.current?.loadRemoteObjects?.(allRemoteObjects);
 
-      // Also load bounding boxes (RoomPlan gizmos) for the project
-      const { data: boxes } = await supabase
-        .from('ar_bounding_boxes')
-        .select('*')
-        .eq('project_id', projectId);
-      if (boxes && boxes.length > 0) {
-        rulerRef.current?.loadBoundingBoxes?.(boxes);
-        console.log(`[AR Collab] Loaded ${boxes.length} bounding boxes`);
-      }
+      // Bounding boxes removed — no longer loading or rendering gizmos
     } catch (e) {
       console.warn("Error fetching remote data:", e);
     }
@@ -217,7 +229,6 @@ export default function ARRulerScreen({ navigation }: any) {
       const sub = supabase.channel(`collab_${projectData.id}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'ar_measurements', filter: `project_id=eq.${projectData.id}` }, () => fetchRemoteData(projectData.id))
         .on('postgres_changes', { event: '*', schema: 'public', table: 'ar_placed_models', filter: `project_id=eq.${projectData.id}` }, () => fetchRemoteData(projectData.id))
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'ar_bounding_boxes', filter: `project_id=eq.${projectData.id}` }, () => fetchRemoteData(projectData.id))
         .on('presence', { event: 'sync' }, () => {
           const newState = sub.presenceState()
           let isWebOnline = false
@@ -272,10 +283,49 @@ export default function ARRulerScreen({ navigation }: any) {
       if (p) {
         setProjectData({ id: p.id, name: p.name });
         setShowProjectModal(false);
-        setPrompt("Downloading AR Anchor...");
         addLog(`📂 Loading project: ${p.name}`);
         
+        // Helper: load shapes after anchor is ready
+        const loadShapesAfterAnchor = async () => {
+          let loadedShapeCount = 0;
+          try {
+            setPrompt("Loading saved measurements...");
+            addLog(`📐 Fetching measurements...`);
+            const { data: measurements } = await supabase
+              .from('ar_measurements')
+              .select('*')
+              .eq('project_id', p.id)
+              .order('created_at', { ascending: true });
+            
+            if (measurements && measurements.length > 0) {
+              const loadedCount = await rulerRef.current?.loadShapes(measurements);
+              loadedShapeCount = measurements.length;
+              addLog(`✅ Loaded ${loadedCount || measurements.length} shapes`);
+              setShapeCount(measurements.length);
+              setUploadedCount(measurements.length);
+            } else {
+              addLog(`📐 No saved measurements found`);
+            }
+          } catch (e: any) {
+            addLog(`❌ Measurements load error: ${e.message}`);
+          }
+          setPrompt(`Project loaded! ${loadedShapeCount} shapes`);
+
+          // 3. Load scene anchors
+          try {
+            const { data: anchorsData } = await supabase
+              .from('ar_scene_anchors')
+              .select('*')
+              .eq('project_id', p.id);
+            if (anchorsData && anchorsData.length > 0) {
+              await rulerRef.current?.loadSceneAnchors(anchorsData);
+              addLog(`📌 Loaded ${anchorsData.length} scene anchors`);
+            }
+          } catch (e: any) { addLog(`⚠️ Scene anchors: ${e.message}`); }
+        };
+        
         // 1. Load anchor map
+        setPrompt("Downloading AR Anchor...");
         const { data, error } = await supabase.storage.from('mesh-scans').download(`${userId}/${p.id}_anchor.map`);
         if (data) {
            const fileUri = `${FileSystem.documentDirectory}temp_load_${Date.now()}.map`;
@@ -285,63 +335,24 @@ export default function ARRulerScreen({ navigation }: any) {
              await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
              try {
                 await rulerRef.current?.loadWorldMap(fileUri);
-                setPrompt("Anchor localized! Loading data...");
                 addLog(`✅ Anchor map loaded`);
+                // Wait for ARKit to relocalize before placing shapes
+                setPrompt("⏳ Waiting for relocalization...");
+                await new Promise(r => setTimeout(r, 3000));
+                setPrompt("Anchor localized! Loading data...");
              } catch (e) {
                 console.log("Load map error:", e);
-                setPrompt("Failed to inject tracking anchor.");
                 addLog(`❌ Anchor load failed: ${e}`);
              }
+             // Load shapes AFTER anchor relocalization
+             await loadShapesAfterAnchor();
            };
            reader.readAsDataURL(data);
         } else {
            setPrompt("No anchor map found. Loading data without anchor...");
            addLog(`⚠️ No anchor map, loading shapes anyway`);
-        }
-
-        // 2. Load measurements (shapes)
-        let loadedShapeCount = 0;
-        try {
-          setPrompt("Loading saved measurements...");
-          addLog(`📐 Fetching measurements...`);
-          const { data: measurements } = await supabase
-            .from('ar_measurements')
-            .select('*')
-            .eq('project_id', p.id)
-            .order('created_at', { ascending: true });
-          
-          if (measurements && measurements.length > 0) {
-            const loadedCount = await rulerRef.current?.loadShapes(measurements);
-            loadedShapeCount = measurements.length;
-            addLog(`✅ Loaded ${loadedCount || measurements.length} shapes`);
-            setShapeCount(measurements.length);
-            setUploadedCount(measurements.length);
-          } else {
-            addLog(`📐 No saved measurements found`);
-          }
-        } catch (e: any) {
-          addLog(`❌ Measurements load error: ${e.message}`);
-        }
-
-        // 3. Load bounding boxes (RoomPlan gizmos)
-        try {
-          addLog(`🏠 Fetching bounding boxes...`);
-          const { data: boxes } = await supabase
-            .from('ar_bounding_boxes')
-            .select('*')
-            .eq('project_id', p.id);
-          
-          if (boxes && boxes.length > 0) {
-            const gizmoCount = await rulerRef.current?.loadBoundingBoxes(boxes);
-            addLog(`✅ Loaded ${gizmoCount || boxes.length} gizmos (${boxes.map((b: any) => b.class_name).join(', ')})`);
-            setPrompt(`Project loaded! ${loadedShapeCount} shapes, ${boxes.length} objects`);
-          } else {
-            addLog(`🏠 No bounding boxes found`);
-            setPrompt(`Project loaded! ${loadedShapeCount} shapes`);
-          }
-        } catch (e: any) {
-          addLog(`❌ Bounding boxes load error: ${e.message}`);
-          setPrompt("Project loaded with some errors.");
+           // No anchor — load shapes immediately  
+           await loadShapesAfterAnchor();
         }
       }
     }
@@ -537,8 +548,7 @@ export default function ARRulerScreen({ navigation }: any) {
           setUploadedCount(prev => prev + 1);
         }
         addLog(`📐 Shape ${shapeNum} synced instantly`);
-        // Also sync CAD data (bounding boxes) immediately — lightweight
-        try { await syncCADData(); } catch (e) { /* non-critical */ }
+        // Bounding box sync removed
       } else {
         addLog(`⚠️ Shape sync failed: ${error.message}`);
       }
@@ -650,7 +660,8 @@ export default function ARRulerScreen({ navigation }: any) {
       await syncMeasurements();
       addLog(`✅ Measurements synced`);
 
-      // 1. Export mesh chunks
+      // 1. Export mesh chunks (only if MESH toggle is ON)
+      if (meshExportEnabled) {
       addLog(`📦 Exporting mesh chunks (max ${chunkSizeMB}MB each)...`);
       const chunks = await rulerRef.current?.exportMeshChunks(chunkSizeMB);
       if (chunks && chunks.length > 0 && !chunks[0].error) {
@@ -671,11 +682,11 @@ export default function ARRulerScreen({ navigation }: any) {
       } else {
         addLog(`⚠️ No mesh data: ${chunks?.[0]?.error || 'empty'}`);
       }
+      } else {
+        addLog(`📦 Mesh export DISABLED — skipped`);
+      }
 
-      // 2. Sync CAD data (bounding boxes, planes)
-      addLog(`🏠 Syncing CAD data (boxes, planes)...`);
-      await syncCADData();
-      addLog(`✅ CAD data synced`);
+      // Bounding box sync removed — camera trajectory still synced via auto-sync
 
       // 3. Save world anchor
       addLog(`⚓ Saving AR Anchor Map...`);
@@ -699,6 +710,49 @@ export default function ARRulerScreen({ navigation }: any) {
     }
   };
 
+  // --- Capture Detail (pause room scan → Object Capture → resume) ---
+  const [isDetailCapturing, setIsDetailCapturing] = useState(false);
+  
+  const handleCaptureDetail = async () => {
+    if (!projectData || !userId) {
+      Alert.alert('Project Required', 'Create a project first.');
+      return;
+    }
+    try {
+      addLogB('📷 Pausing room scan for detail capture...');
+      
+      // 1. Get camera transform BEFORE pausing
+      const transform = await rulerRef.current?.getCameraTransform();
+      
+      // 2. Pause room scan (tracking continues)
+      await rulerRef.current?.pauseRoomScan();
+      setIsDetailCapturing(true);
+      
+      // 3. Navigate to Object Capture with room context
+      navigation.navigate('ObjectCapture', {
+        projectId: projectData.id,
+        roomCameraTransform: transform || [],
+        returnToRoomScan: true,
+      });
+    } catch (e: any) {
+      addLogB(`❌ Detail capture error: ${e.message}`);
+    }
+  };
+  
+  // Auto-resume room scan when returning from Object Capture
+  useFocusEffect(
+    useCallback(() => {
+      if (isDetailCapturing) {
+        (async () => {
+          addLogB('▶ Resuming room scan after detail capture...');
+          await rulerRef.current?.resumeRoomScan();
+          setIsDetailCapturing(false);
+          setPrompt('🏠 Room scan resumed — continue scanning!');
+          addLogB('✅ Room scan resumed');
+        })();
+      }
+    }, [isDetailCapturing])
+  );
   // --- Room Scan Start/Stop Handlers ---
   const handleStartRoomScan = async () => {
     if (!userId) {
@@ -710,6 +764,108 @@ export default function ARRulerScreen({ navigation }: any) {
       return;
     }
     try {
+      // --- Check for previous manual anchors (2nd+ scan) ---
+      const newSessionNum = scanSessionNumber + 1;
+      setScanSessionNumber(newSessionNum);
+      
+      if (projectData) {
+        // Always check for previous manual anchors in DB (existing project or 2nd+ scan)
+        const { data: prevAnchors } = await supabase
+          .from('ar_scene_anchors')
+          .select('*')
+          .eq('project_id', projectData.id)
+          .eq('type', 'manual')
+          .order('created_at', { ascending: true });
+        
+        if (prevAnchors && prevAnchors.length >= 3) {
+          setPreviousAnchors(prevAnchors);
+          
+          // Ask about matching
+          const shouldMatch = await new Promise<boolean>((resolve) => {
+            Alert.alert(
+              `📍 ${prevAnchors.length} předchozích kotev`,
+              'Chcete osátit předchozí kotvy pro zarovnání skenů?',
+              [
+                { text: 'Přeskočit', style: 'cancel', onPress: () => resolve(false) },
+                { text: 'Ano, osátit', onPress: () => resolve(true) },
+              ],
+            );
+          });
+          
+          if (shouldMatch) {
+            // Start matching mode
+            await rulerRef.current?.startAnchorMatching(prevAnchors);
+            setIsMatchingAnchors(true);
+            setMatchCount(0);
+            
+            // Sequential matching: one anchor at a time
+            for (let i = 0; i < prevAnchors.length && i < 6; i++) {
+              const anchor = prevAnchors[i];
+              const matched = await new Promise<boolean>((resolve) => {
+                Alert.alert(
+                  `📍 Kotva ${i + 1}/${Math.min(prevAnchors.length, 6)}`,
+                  `Jdi k "${anchor.name}" a stiskni OK.\nPozice: [${(anchor.position_x as number).toFixed(1)}, ${(anchor.position_z as number).toFixed(1)}]`,
+                  [
+                    { text: 'Přeskočit', style: 'cancel', onPress: () => resolve(false) },
+                    { text: 'OK — Jsem tady', onPress: () => resolve(true) },
+                  ],
+                );
+              });
+              
+              if (matched) {
+                await rulerRef.current?.matchAnchor(i);
+                setMatchCount((prev: number) => prev + 1);
+                addLogB(`✅ Matched: ${anchor.name}`);
+              }
+            }
+            
+            // Compute transform if 3+ matched
+            const mCount = await rulerRef.current?.getMatchedCount();
+            if (mCount >= 3) {
+              const transform = await rulerRef.current?.computeKabschTransform();
+              if (transform) {
+                setSessionTransform(transform);
+                addLogB(`🎯 Kabsch transform computed! ${mCount} anchors matched`);
+                
+                // Save transform to project metadata
+                await supabase.from('ar_projects').update({
+                  session_transform: transform,
+                }).eq('id', projectData.id);
+              }
+            } else {
+              addLogB(`⚠️ Only ${mCount} anchors matched (need 3+), no transform`);
+            }
+            setIsMatchingAnchors(false);
+          }
+        }
+      }
+      
+      // Ask about auto-photo BEFORE starting scan
+      await new Promise<void>((resolve) => {
+        Alert.alert(
+          '📸 Automatické fotky',
+          'Pořizovat fotky automaticky po 1 metru?\nFotky budou viditelné jako růžové body.',
+          [
+            {
+              text: 'Ne',
+              style: 'cancel',
+              onPress: async () => {
+                await rulerRef.current?.enableAutoPhoto(false, 1.0);
+                resolve();
+              },
+            },
+            {
+              text: 'Ano',
+              onPress: async () => {
+                await rulerRef.current?.enableAutoPhoto(true, 1.0);
+                addLogB('📸 Auto-photo enabled (1m grid)');
+                resolve();
+              },
+            },
+          ],
+        );
+      });
+      
       await rulerRef.current?.startRoomScan();
       setIsRoomScanning(true);
       setPrompt('🏠 Room scan active — move slowly around the room...');
@@ -723,24 +879,133 @@ export default function ARRulerScreen({ navigation }: any) {
     try {
       setIsRoomScanning(false);
       setIsRoomFinalizing(true);
-      setPrompt('⏳ Exporting mesh before stopping scan...');
-      addLogB('🛑 Stopping room scan...');
+      setPrompt('⏳ Exporting data before stopping scan...');
+      addLogB('🛑 Preparing to stop room scan...');
       
+      // --- ANCHOR PLACEMENT FLOW (reactive UI — shows RED +ADD button) ---
+      const placeAnchorsResult = await new Promise<boolean>((resolve) => {
+        Alert.alert(
+          '📍 Umísti referenční kotvy',
+          'Zamiř křížkem a tapni červené + pro umístění.\nPřepínej Bod/Hrana. Min. 3 kotvy.',
+          [
+            { text: 'Přeskočit', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Ano, umístit', onPress: () => resolve(true) },
+          ],
+        );
+      });
       
-      // Note: mesh export was removed in previous refactor — skip directly to stopping session
-      // 2. Stop RoomCaptureSession (triggers RoomBuilder finalization on Swift side)
+      if (placeAnchorsResult) {
+        setIsPlacingAnchors(true);
+        setAnchorCount(0);
+        setPrompt('📍 Zamiř křížkem a tapni + pro umístění kotvy');
+        
+        // Wait for user to finish placing anchors (Hotovo button sets resolve)
+        await new Promise<void>((resolve) => {
+          anchorResolveRef.current = resolve;
+        });
+        
+        // Save manual anchors to DB
+        const anchors = await rulerRef.current?.getManualAnchors();
+        if (anchors && anchors.length > 0) {
+          const payload = anchors.map((a: any) => ({
+            id: a.id,
+            project_id: projectData!.id,
+            user_id: userId,
+            name: a.name,
+            type: 'manual',
+            position_x: a.position_x,
+            position_y: a.position_y,
+            position_z: a.position_z,
+            scan_session_id: `session_${scanSessionNumber}`,
+          }));
+          await supabase.from('ar_scene_anchors').upsert(payload, { onConflict: 'id' });
+          addLogB(`✅ ${anchors.length} manual anchors saved to DB`);
+        }
+        setIsPlacingAnchors(false);
+      }
+      
+      // ===== EXPORT MESH + ANCHOR BEFORE STOP (stopRoomScan resets AR session!) =====
+      
+      // 1. Export mesh FIRST (before session reset wipes reconstruction data)
+      let meshSaved = false;
+      if (meshExportEnabled) {
+      addLogB('📦 Exporting mesh BEFORE stop...');
+      setPrompt('⏳ Capturing mesh...');
+      try {
+        const chunks = await rulerRef.current?.exportMeshChunks(chunkSizeMB);
+        addLogB(`📦 exportMeshChunks returned: ${chunks?.length ?? 'null'} chunks`);
+        if (chunks && chunks.length > 0 && !chunks[0].error) {
+          let totalV = 0, totalF = 0, totalBytes = 0;
+          const encoder = new TextEncoder();
+          for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i];
+            totalV += chunk.vertexCount;
+            totalF += chunk.faceCount;
+            totalBytes += chunk.byteSize;
+            const fileName = `${userId}/${projectData!.id}_chunk_${i}.obj`;
+            const objBytes = encoder.encode(chunk.obj);
+            await supabase.storage.from('mesh-scans').upload(fileName, objBytes, {
+              contentType: 'text/plain',
+              upsert: true,
+            });
+          }
+          for (let i = 0; i < 20; i++) {
+            const liveFileName = `${userId}/${projectData!.id}_live_chunk_${i}.obj`;
+            await supabase.storage.from('mesh-scans').remove([liveFileName]).catch(() => {});
+          }
+          const { data: urlData } = supabase.storage.from('mesh-scans').getPublicUrl(`${userId}/${projectData!.id}_chunk_0.obj`);
+          await supabase.from('ar_projects').update({
+            mesh_url: urlData?.publicUrl || "",
+            mesh_vertices_count: totalV,
+            mesh_faces_count: totalF,
+            mesh_file_size: totalBytes,
+          }).eq('id', projectData!.id);
+          addLogB(`✅ Mesh saved: ${totalV}v ${totalF}f ${chunks.length} chunks`);
+          meshSaved = true;
+        } else {
+          addLogB(`⚠️ No mesh data: ${chunks?.[0]?.error || 'empty'}`);
+        }
+      } catch (meshErr: any) {
+        addLogB(`❌ Mesh export error: ${meshErr.message}`);
+      }
+      } else {
+        addLogB('📦 Mesh export DISABLED — skipped');
+      }
+      
+      // 2. Save anchor map BEFORE stop (world map is more complete before reset)
+      try {
+        addLogB('⚓ Saving anchor map...');
+        const mapUrl = await rulerRef.current?.saveWorldMap();
+        if (mapUrl) {
+          const mapFileName = `${userId}/${projectData!.id}_anchor.map`;
+          const formDataMap = new FormData();
+          formDataMap.append('file', { uri: `file://${mapUrl}`, name: 'anchor.map', type: 'application/octet-stream' } as any);
+          await supabase.storage.from('mesh-scans').upload(mapFileName, formDataMap, { upsert: true });
+          await FileSystem.deleteAsync(mapUrl, { idempotent: true }).catch(() => {});
+          addLogB('✅ Anchor map saved');
+        } else {
+          addLogB('⚠️ No anchor map available');
+        }
+      } catch (anchorErr: any) {
+        addLogB(`⚠️ Anchor save: ${anchorErr.message}`);
+      }
+      
+      // ===== NOW STOP SCAN (this resets the AR session) =====
+      
+      // 3. Stop RoomCaptureSession (triggers RoomBuilder finalization)
       addLogB('🛑 Stopping RoomCaptureSession...');
       await rulerRef.current?.stopRoomScan();
       
-      // 3. Wait for RoomBuilder ML finalization
+      // 4. Wait for RoomBuilder ML finalization
       addLogB('🧠 RoomBuilder ML finalization in progress...');
       await new Promise(r => setTimeout(r, 4000));
       
-      // 4. Sync final RoomPlan data immediately
+      // 5. Send FINALIZED RoomPlan data (session-specific — accumulates across scans)
+      const scanSessionId = `session_${Date.now()}`;
       const roomData = await rulerRef.current?.exportRoomPlanData();
-      if (roomData && (roomData.wallCount > 0 || roomData.doorCount > 0 || roomData.windowCount > 0)) {
+      if (roomData && (roomData.wallCount > 0 || roomData.doorCount > 0 || roomData.windowCount > 0 || roomData.objectCount > 0)) {
         await supabase.from('ar_roomplan').upsert({
-          id: `${projectData!.id}_roomplan`,
+          id: `${projectData!.id}_roomplan_${scanSessionId}`,
           project_id: projectData!.id,
           user_id: userId,
           walls: roomData.walls,
@@ -753,16 +1018,92 @@ export default function ARRulerScreen({ navigation }: any) {
           door_count: roomData.doorCount,
           window_count: roomData.windowCount,
           object_count: roomData.objectCount,
-          is_finalized: roomData.isFinalized ?? false,
+          is_finalized: true,
           inferred_ceiling_y: roomData.inferredCeilingY ?? null,
           inferred_floor_y: roomData.inferredFloorY ?? null,
           updated_at: new Date().toISOString(),
         }, { onConflict: 'id' });
-        addLogB(`✅ RoomPlan ${roomData.isFinalized ? '[FINAL]' : '[preview]'}: ${roomData.wallCount}W ${roomData.doorCount}D ${roomData.windowCount}Wi`);
+        addLogB(`✅ RoomPlan [FINAL]: ${roomData.wallCount}W ${roomData.doorCount}D ${roomData.windowCount}Wi ${roomData.objectCount}O`);
+      }
+      
+      // 3b. Per-element upsert (UUID-based, persistent)
+      const sessionId = `session_${Date.now()}`;
+      try {
+        const elements = await rulerRef.current?.exportRoomPlanElements();
+        if (elements && elements.length > 0) {
+          const payload = elements.map((el: any) => ({
+            id: el.id,
+            project_id: projectData!.id,
+            user_id: userId,
+            category: el.category,
+            subcategory: el.subcategory || null,
+            transform: el.transform,
+            dimensions: el.dimensions,
+            is_finalized: true,
+            scan_session_id: sessionId,
+            updated_at: new Date().toISOString(),
+          }));
+          await supabase.from('ar_roomplan_elements').upsert(payload, { onConflict: 'id' });
+          addLogB(`✅ Elements [FINAL]: ${elements.length} upserted`);
+        }
+      } catch (elErr: any) {
+        addLogB(`⚠️ Elements upsert: ${elErr.message}`);
+      }
+      
+      // 6. Upload auto-captured photos
+      try {
+        const autoPhotos = await rulerRef.current?.exportAutoPhotos();
+        if (autoPhotos && autoPhotos.length > 0) {
+          addLogB(`📸 Uploading ${autoPhotos.length} auto-photos...`);
+          let uploaded = 0;
+          for (const photo of autoPhotos) {
+            try {
+              const fileBase64 = await FileSystem.readAsStringAsync(
+                photo.uri.replace('file://', ''),
+                { encoding: FileSystem.EncodingType.Base64 }
+              );
+              const byteArray = Uint8Array.from(atob(fileBase64), c => c.charCodeAt(0));
+              const fileName = `auto_${Date.now()}_${uploaded}.jpg`;
+              const storagePath = `${userId}/${projectData!.id}/${fileName}`;
+              
+              const { data: uploadData, error: uploadErr } = await supabase.storage
+                .from('ar-photos')
+                .upload(storagePath, byteArray, {
+                  contentType: 'image/jpeg',
+                  cacheControl: '3600',
+                  upsert: false,
+                });
+              
+              if (!uploadErr && uploadData) {
+                const { data: { publicUrl } } = supabase.storage
+                  .from('ar-photos')
+                  .getPublicUrl(storagePath);
+                
+                await supabase.from('ar_photos').insert({
+                  id: `auto_${Date.now()}_${uploaded}`,
+                  project_id: projectData!.id,
+                  user_id: userId,
+                  file_path: storagePath,
+                  public_url: publicUrl,
+                  transform: photo.transform,
+                  is_auto: true,
+                });
+                uploaded++;
+              }
+            } catch (photoErr: any) {
+              // Skip individual photo errors
+            }
+          }
+          addLogB(`✅ Auto-photos: ${uploaded}/${autoPhotos.length} uploaded`);
+          // Disable auto-photo after stop
+          await rulerRef.current?.enableAutoPhoto(false, 1.0);
+        }
+      } catch (autoErr: any) {
+        addLogB(`⚠️ Auto-photos: ${autoErr.message}`);
       }
       
       setIsRoomFinalizing(false);
-      setPrompt('✅ Room scan complete! Data uploaded.');
+      setPrompt(`✅ Room scan complete! ${meshSaved ? 'Mesh + ' : ''}RoomPlan finalized.`);
     } catch (e: any) {
       setIsRoomFinalizing(false);
       addLogB(`❌ Stop scan error: ${e.message}`);
@@ -770,59 +1111,129 @@ export default function ARRulerScreen({ navigation }: any) {
     }
   };
 
-  // 15s auto-sync timer for measurements + bounding boxes + RoomPlan + anchors
+  // 15s auto-sync timer for measurements + RoomPlan + mesh + anchors
+  // --- Anchor Placement Handlers (called by RED +ADD button overlay) ---
+  const handlePlaceAnchorTap = async () => {
+    if (!rulerRef.current) return;
+    try {
+      await rulerRef.current.placeManualAnchor(anchorType);
+    } catch {
+      // Fallback for old native build without type parameter
+      await rulerRef.current.placeManualAnchor();
+    }
+    const newCount = await rulerRef.current.getManualAnchorCount() || 0;
+    setAnchorCount(newCount);
+    addLogB(`📍 Placed ${anchorType} anchor ${newCount}`);
+  };
+
+  const handleFinishAnchors = () => {
+    setIsPlacingAnchors(false);
+    if (anchorResolveRef.current) {
+      anchorResolveRef.current();
+      anchorResolveRef.current = null;
+    }
+  };
+
+  // 15s auto-sync timer for measurements + RoomPlan + mesh + anchors
   useEffect(() => {
     if (!projectData || !userId) return;
     const interval = setInterval(async () => {
       if (isSyncing) return;
       
-      // Measurements (always on)
+      // 1. Measurements (always on)
       try {
         addLogM(`🔄 Auto-syncing...`);
         await syncMeasurements();
         addLogM(`✅ Synced`);
       } catch (e: any) { addLogM(`❌ ${e.message}`); }
       
-      // Bounding boxes + RoomPlan (always on)
-      try {
-        addLogB(`🔄 Auto-syncing CAD + RoomPlan...`);
-        await syncCADData();
-        
-        // RoomPlan structured data (only if scanning or finalized)
-        if (isRoomScanning || isRoomFinalizing) {
-          try {
-            const roomData = await rulerRef.current?.exportRoomPlanData();
-            if (roomData && (roomData.wallCount > 0 || roomData.doorCount > 0 || roomData.windowCount > 0)) {
-              await supabase.from('ar_roomplan').upsert({
-                id: `${projectData.id}_roomplan`,
-                project_id: projectData.id,
-                user_id: userId,
-                walls: roomData.walls,
-                doors: roomData.doors,
-                windows: roomData.windows,
-                openings: roomData.openings,
-                floors: roomData.floors,
-                objects: roomData.objects,
-                wall_count: roomData.wallCount,
-                door_count: roomData.doorCount,
-                window_count: roomData.windowCount,
-                object_count: roomData.objectCount,
-                is_finalized: roomData.isFinalized ?? false,
-                inferred_ceiling_y: roomData.inferredCeilingY ?? null,
-                inferred_floor_y: roomData.inferredFloorY ?? null,
-                updated_at: new Date().toISOString(),
-              }, { onConflict: 'id' });
-              addLogB(`✅ RoomPlan${roomData.isFinalized ? ' [FINAL]' : ''}: ${roomData.wallCount}W ${roomData.doorCount}D ${roomData.windowCount}Wi ${roomData.objectCount}O`);
-            }
-          } catch (rpErr: any) {
-            addLogB(`✅ CAD ok, RoomPlan: ${rpErr.message}`);
+      // 2. RoomPlan structured data (during scan)
+      if (isRoomScanning || isRoomFinalizing) {
+        try {
+          const roomData = await rulerRef.current?.exportRoomPlanData();
+          if (roomData && (roomData.wallCount > 0 || roomData.doorCount > 0 || roomData.windowCount > 0 || roomData.objectCount > 0)) {
+            await supabase.from('ar_roomplan').upsert({
+              id: `${projectData.id}_roomplan_live`,
+              project_id: projectData.id,
+              user_id: userId,
+              walls: roomData.walls,
+              doors: roomData.doors,
+              windows: roomData.windows,
+              openings: roomData.openings,
+              floors: roomData.floors,
+              objects: roomData.objects,
+              wall_count: roomData.wallCount,
+              door_count: roomData.doorCount,
+              window_count: roomData.windowCount,
+              object_count: roomData.objectCount,
+              is_finalized: false,
+              inferred_ceiling_y: roomData.inferredCeilingY ?? null,
+              inferred_floor_y: roomData.inferredFloorY ?? null,
+              updated_at: new Date().toISOString(),
+            }, { onConflict: 'id' });
+          addLogB(`✅ RoomPlan: ${roomData.wallCount}W ${roomData.doorCount}D ${roomData.windowCount}Wi ${roomData.objectCount}O`);
           }
-        } else {
-          addLogB(`✅ CAD synced`);
+          
+          // 2b. Per-element upsert (UUID-based merge — old elements stay, new ones added)
+          const elements = await rulerRef.current?.exportRoomPlanElements();
+          if (elements && elements.length > 0) {
+            const payload = elements.map((el: any) => ({
+              id: el.id,
+              project_id: projectData.id,
+              user_id: userId,
+              category: el.category,
+              subcategory: el.subcategory || null,
+              transform: el.transform,
+              dimensions: el.dimensions,
+              is_finalized: false,
+              scan_session_id: `live_${Date.now()}`,
+              updated_at: new Date().toISOString(),
+            }));
+            await supabase.from('ar_roomplan_elements').upsert(payload, { onConflict: 'id' });
+            addLogB(`✅ Elements: ${elements.length} upserted`);
+          }
+        } catch (rpErr: any) {
+          addLogB(`❌ RoomPlan: ${rpErr.message}`);
         }
-      } catch (e: any) { addLogB(`❌ ${e.message}`); }
+
+        // 3. Mesh chunks streaming (during scan only — respects mesh toggle)
+        if (meshExportEnabled) {
+        try {
+          const chunks = await rulerRef.current?.exportMeshChunks(chunkSizeMB);
+          if (chunks && chunks.length > 0 && !chunks[0].error) {
+            for (let i = 0; i < chunks.length; i++) {
+              const chunk = chunks[i];
+              const fileName = `${userId}/${projectData.id}_live_chunk_${i}.obj`;
+              const fileUri = `${FileSystem.documentDirectory}temp_mesh_live_${i}.obj`;
+              await FileSystem.writeAsStringAsync(fileUri, chunk.obj, { encoding: 'utf8' });
+              const formData = new FormData();
+              formData.append('file', { uri: fileUri, name: `chunk_${i}.obj`, type: 'model/obj' } as any);
+              await supabase.storage.from('mesh-scans').upload(fileName, formData, { upsert: true });
+              await FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => {});
+            }
+            addLogB(`✅ Mesh: ${chunks.length} chunks streamed`);
+          }
+        } catch (meshErr: any) {
+          addLogB(`⚠️ Mesh stream: ${meshErr.message}`);
+        }
+        } // end meshExportEnabled
+      } else {
+        addLogB(`✅ Idle (no scan)`);
+      }
       
-      // Anchors (always on — can't disable)
+      // 4. Camera trajectory + AR planes (always on — separate from removed bounding boxes)
+      try {
+        const cadData = await rulerRef.current?.exportCADData();
+        if (cadData && (cadData.trajectory || cadData.planes)) {
+          const updatePayload: any = {};
+          if (cadData.planes) updatePayload.ar_anchors_json = cadData.planes;
+          if (cadData.trajectory) updatePayload.camera_trajectory = cadData.trajectory;
+          await supabase.from('ar_projects').update(updatePayload).eq('id', projectData.id);
+          addLogA(`📍 Trajectory synced`);
+        }
+      } catch (e: any) { addLogA(`⚠️ ${e.message}`); }
+      
+      // 5. Anchor map save (non-blocking — critical for session resume)
       try {
         const mapUrl = await rulerRef.current?.saveWorldMap();
         if (mapUrl) {
@@ -831,9 +1242,32 @@ export default function ARRulerScreen({ navigation }: any) {
           formDataMap.append('file', { uri: `file://${mapUrl}`, name: 'anchor.map', type: 'application/octet-stream' } as any);
           await supabase.storage.from('mesh-scans').upload(mapFileName, formDataMap, { upsert: true });
           await FileSystem.deleteAsync(mapUrl, { idempotent: true }).catch(() => {});
-          addLogA(`⚓ Anchor saved`);
+          addLogA('⚓ Anchor saved');
         }
-      } catch (e: any) { addLogA(`❌ ${e.message}`); }
+      } catch (anchorErr: any) { addLogA(`⚠️ Anchor: ${anchorErr.message}`); }
+      
+      // 6. Scene anchors sync (upsert named anchors to DB)
+      try {
+        const sceneAnchors = await rulerRef.current?.exportSceneAnchors();
+        if (sceneAnchors && sceneAnchors.length > 0) {
+          const payload = sceneAnchors.map((a: any) => ({
+            id: a.id,
+            project_id: projectData.id,
+            user_id: userId,
+            name: a.name,
+            type: a.type,
+            position_x: a.position_x,
+            position_y: a.position_y,
+            position_z: a.position_z,
+            rotation_x: a.rotation_x,
+            rotation_y: a.rotation_y,
+            rotation_z: a.rotation_z,
+            updated_at: new Date().toISOString(),
+          }));
+          await supabase.from('ar_scene_anchors').upsert(payload, { onConflict: 'id' });
+          addLogA(`📌 ${sceneAnchors.length} scene anchors synced`);
+        }
+      } catch (e: any) { addLogA(`⚠️ Anchors: ${e.message}`); }
       
     }, 15000);
     return () => clearInterval(interval);
@@ -884,8 +1318,7 @@ export default function ARRulerScreen({ navigation }: any) {
         });
       }
       
-      setPrompt(`Syncing CAD Intelligence...`);
-      await syncCADData();
+      // Bounding box sync removed
       
       setPrompt(`Saving AR Anchor Map...`);
       const mapUrl = await rulerRef.current?.saveWorldMap();
@@ -989,10 +1422,19 @@ export default function ARRulerScreen({ navigation }: any) {
       }
       
       const fileName = `${userId}/${projectData.id}_${Date.now()}.jpg`;
-      const formData = new FormData();
-      formData.append('file', { uri: result.uri, name: 'photo.jpg', type: 'image/jpeg' } as any);
       
-      const { error: uploadErr } = await supabase.storage.from('ar-photos').upload(fileName, formData);
+      // Read photo as base64 and upload as binary (FormData doesn't work reliably on RN)
+      const photoBase64 = await FileSystem.readAsStringAsync(result.uri.replace('file://', ''), {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      const byteArray = Uint8Array.from(atob(photoBase64), c => c.charCodeAt(0));
+      
+      const { error: uploadErr } = await supabase.storage
+        .from('ar-photos')
+        .upload(fileName, byteArray, {
+          contentType: 'image/jpeg',
+          upsert: false,
+        });
       if (uploadErr) throw uploadErr;
       
       const { data: publicUrlData } = supabase.storage.from('ar-photos').getPublicUrl(fileName);
@@ -1105,6 +1547,14 @@ export default function ARRulerScreen({ navigation }: any) {
          </TouchableOpacity>
 
          <TouchableOpacity 
+           style={[styles.circleBtn, meshExportEnabled && { borderColor: '#FF9800', backgroundColor: '#FF9800' }]}
+           onPress={() => setMeshExportEnabled(!meshExportEnabled)}
+           activeOpacity={0.7}
+         >
+            <Text style={[styles.circleBtnText, meshExportEnabled && { color: '#000' }]}>MESH</Text>
+         </TouchableOpacity>
+
+         <TouchableOpacity 
            style={[styles.circleBtn, showRoomPlan && { borderColor: '#AB47BC', backgroundColor: '#AB47BC' }]}
            onPress={() => setShowRoomPlan(!showRoomPlan)}
            activeOpacity={0.7}
@@ -1132,6 +1582,17 @@ export default function ARRulerScreen({ navigation }: any) {
               <Text style={[styles.circleBtnText, { color: '#4CAF50' }]}>SCAN</Text>
             )}
          </TouchableOpacity>
+
+          {/* Capture Detail button — only visible during scanning */}
+          {isRoomScanning && (
+            <TouchableOpacity
+              style={[styles.circleBtn, { borderColor: '#E040FB', backgroundColor: '#222', width: 52, height: 52 }]}
+              onPress={handleCaptureDetail}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.circleBtnText, { color: '#E040FB', fontSize: 8 }]}>📷{"\n"}DETAIL</Text>
+            </TouchableOpacity>
+          )}
       </View>
 
       {/* Cut Room controls — only when CUT=ON */}
@@ -1296,6 +1757,68 @@ export default function ARRulerScreen({ navigation }: any) {
             <Text style={{ color: '#000', fontSize: 36, lineHeight: 40, fontWeight: '300', marginTop: -2 }}>+</Text>
          </TouchableOpacity>
       </View>
+
+      {/* ===== ANCHOR PLACEMENT OVERLAY — RED +ADD button when isPlacingAnchors ===== */}
+      {isPlacingAnchors && (
+        <View style={{ position: 'absolute', bottom: insets.bottom + 20, left: 0, right: 0, alignItems: 'center', zIndex: 20 }} pointerEvents="box-none">
+          {/* Anchor count + status */}
+          <Text style={{ color: '#FFF', fontSize: 12, fontWeight: 'bold', marginBottom: 8, textShadowColor: '#000', textShadowRadius: 4 }}>
+            📍 Kotvy: {anchorCount}{anchorCount >= 3 ? ' ✅' : ` (min. 3)`}
+          </Text>
+
+          {/* Bod / Hrana toggle */}
+          <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
+            <TouchableOpacity
+              style={{
+                paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20,
+                backgroundColor: anchorType === 'point' ? '#FF1744' : 'rgba(255,255,255,0.15)',
+                borderWidth: 2, borderColor: anchorType === 'point' ? '#FF1744' : 'rgba(255,255,255,0.3)',
+              }}
+              onPress={() => setAnchorType('point')}
+            >
+              <Text style={{ color: '#FFF', fontSize: 12, fontWeight: 'bold' }}>⚫ Bod</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={{
+                paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20,
+                backgroundColor: anchorType === 'edge' ? '#FF1744' : 'rgba(255,255,255,0.15)',
+                borderWidth: 2, borderColor: anchorType === 'edge' ? '#FF1744' : 'rgba(255,255,255,0.3)',
+              }}
+              onPress={() => setAnchorType('edge')}
+            >
+              <Text style={{ color: '#FFF', fontSize: 12, fontWeight: 'bold' }}>│ Hrana</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* RED + button — place anchor at crosshair */}
+          <TouchableOpacity
+            style={{
+              width: 64, height: 64, borderRadius: 32,
+              backgroundColor: '#FF1744', borderWidth: 3, borderColor: '#FF1744',
+              alignItems: 'center', justifyContent: 'center',
+              shadowColor: '#FF1744', shadowOpacity: 0.6, shadowRadius: 12, shadowOffset: { width: 0, height: 0 },
+            }}
+            onPress={handlePlaceAnchorTap}
+            activeOpacity={0.7}
+          >
+            <Text style={{ color: '#FFF', fontSize: 36, lineHeight: 40, fontWeight: '300', marginTop: -2 }}>+</Text>
+          </TouchableOpacity>
+
+          {/* Hotovo button — only when >= 3 anchors */}
+          {anchorCount >= 3 && (
+            <TouchableOpacity
+              style={{
+                marginTop: 10, paddingHorizontal: 24, paddingVertical: 10, borderRadius: 20,
+                backgroundColor: '#4CAF50', borderWidth: 2, borderColor: '#4CAF50',
+              }}
+              onPress={handleFinishAnchors}
+              activeOpacity={0.7}
+            >
+              <Text style={{ color: '#FFF', fontSize: 14, fontWeight: 'bold' }}>Hotovo ✅</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
 
       {/* ===== SYNC LOG — full-width, collapsible ===== */}
       {!showDebugPanel && (

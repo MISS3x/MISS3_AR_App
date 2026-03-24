@@ -179,78 +179,79 @@ export default function CompanySelectScreen({ navigation }: CompanySelectScreenP
         Browse product catalogs in augmented reality
       </Text>
 
-      {/* Tools Section */}
+      {/* Tools Grid — iPhone-style square icons, 4 per row */}
       <View style={styles.toolsSection}>
         <Text style={styles.toolsSectionTitle}>TOOLS</Text>
-        <TouchableOpacity 
-          onPress={() => navigation.navigate('RoomSandbox')}
-          activeOpacity={0.85}
-          style={[styles.toolCard, { marginBottom: spacing.sm }]}
-        >
-          <LinearGradient
-            colors={['#1a1a3e', '#0d1b2a']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.toolCardGradient}
-          >
-            <View style={styles.toolCardLeft}>
-              <Text style={styles.toolIcon}>📐</Text>
-              <View>
-                <Text style={styles.toolTitle}>Multi Models Viewer</Text>
-                <Text style={styles.toolSubtitle}>Place multiple 3D models in your room</Text>
-              </View>
-            </View>
-            <View style={styles.proBadge}>
-              <Text style={styles.proBadgeText}>PRO</Text>
-            </View>
-          </LinearGradient>
-        </TouchableOpacity>
+        <View style={styles.toolsGrid}>
 
-        <TouchableOpacity 
-          onPress={() => navigation.navigate('ARRuler')}
-          activeOpacity={0.85}
-          style={styles.toolCard}
-        >
-          <LinearGradient
-            colors={['#3e2a1a', '#2a1a0d']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.toolCardGradient}
+          <TouchableOpacity
+            onPress={() => navigation.navigate('RoomSandbox')}
+            activeOpacity={0.8}
+            style={styles.toolTile}
           >
-            <View style={styles.toolCardLeft}>
-              <Text style={styles.toolIcon}>📏</Text>
-              <View>
-                <Text style={styles.toolTitle}>AR Room Scanner</Text>
-                <Text style={styles.toolSubtitle}>Scan & measure rooms mathematically in 3D</Text>
+            <LinearGradient colors={['#1a1a3e', '#0d1b2a']} style={styles.toolTileGradient}>
+              <Text style={styles.toolTileIcon}>📐</Text>
+              <View style={[styles.tileBadge, { backgroundColor: colors.primary }]}>
+                <Text style={styles.tileBadgeText}>PRO</Text>
               </View>
-            </View>
-          </LinearGradient>
-        </TouchableOpacity>
+            </LinearGradient>
+            <Text style={styles.toolTileLabel} numberOfLines={2}>Multi Models</Text>
+          </TouchableOpacity>
 
-        <TouchableOpacity 
-          onPress={() => navigation.navigate('ObjectCapture')}
-          activeOpacity={0.85}
-          style={[styles.toolCard, { marginTop: spacing.sm }]}
-        >
-          <LinearGradient
-            colors={['#1a3e3e', '#0d2a2a']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.toolCardGradient}
+          <TouchableOpacity
+            onPress={() => navigation.navigate('ARRuler')}
+            activeOpacity={0.8}
+            style={styles.toolTile}
           >
-            <View style={styles.toolCardLeft}>
-              <Text style={styles.toolIcon}>🗿</Text>
-              <View>
-                <Text style={styles.toolTitle}>AR Object Scanner</Text>
-                <Text style={styles.toolSubtitle}>High-fidelity 3D modeling via Photogrammetry</Text>
-              </View>
-            </View>
-            <View style={[styles.proBadge, { backgroundColor: '#FFD700' }]}>
-              <Text style={styles.proBadgeText}>NEW</Text>
-            </View>
-          </LinearGradient>
-        </TouchableOpacity>
+            <LinearGradient colors={['#3e2a1a', '#2a1a0d']} style={styles.toolTileGradient}>
+              <Text style={styles.toolTileIcon}>🏠</Text>
+            </LinearGradient>
+            <Text style={styles.toolTileLabel} numberOfLines={2}>Room Scanner</Text>
+          </TouchableOpacity>
 
+          <TouchableOpacity
+            onPress={() => navigation.navigate('ObjectCapture')}
+            activeOpacity={0.8}
+            style={styles.toolTile}
+          >
+            <LinearGradient colors={['#1a3e3e', '#0d2a2a']} style={styles.toolTileGradient}>
+              <Text style={styles.toolTileIcon}>🗿</Text>
+              <View style={[styles.tileBadge, { backgroundColor: '#FFD700' }]}>
+                <Text style={styles.tileBadgeText}>NEW</Text>
+              </View>
+            </LinearGradient>
+            <Text style={styles.toolTileLabel} numberOfLines={2}>Object Scanner</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => navigation.navigate('ARTape')}
+            activeOpacity={0.8}
+            style={styles.toolTile}
+          >
+            <LinearGradient colors={['#2a3e1a', '#1a2a0d']} style={styles.toolTileGradient}>
+              <Text style={styles.toolTileIcon}>📏</Text>
+              <View style={[styles.tileBadge, { backgroundColor: '#4CAF50' }]}>
+                <Text style={styles.tileBadgeText}>NEW</Text>
+              </View>
+            </LinearGradient>
+            <Text style={styles.toolTileLabel} numberOfLines={2}>AR Tape</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => navigation.navigate('ARSketch')}
+            activeOpacity={0.8}
+            style={styles.toolTile}
+          >
+            <LinearGradient colors={['#2a1a3e', '#1a0d2a']} style={styles.toolTileGradient}>
+              <Text style={styles.toolTileIcon}>✏️</Text>
+              <View style={[styles.tileBadge, { backgroundColor: '#9C27B0' }]}>
+                <Text style={styles.tileBadgeText}>SOON</Text>
+              </View>
+            </LinearGradient>
+            <Text style={styles.toolTileLabel} numberOfLines={2}>AR Sketch</Text>
+          </TouchableOpacity>
+
+        </View>
       </View>
 
       <View style={styles.sectionDivider} />
@@ -470,7 +471,6 @@ const styles = StyleSheet.create({
     color: colors.primary,
     marginTop: spacing.md,
   },
-  // Tools Section
   toolsSection: {
     paddingHorizontal: spacing.lg,
     marginBottom: spacing.md,
@@ -482,50 +482,49 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
     marginBottom: spacing.sm,
   },
-  toolCard: {
+  toolsGrid: {
+    flexDirection: 'row' as const,
+    flexWrap: 'wrap' as const,
+    gap: spacing.sm,
+  },
+  toolTile: {
+    width: '23%' as any,
+    alignItems: 'center' as const,
+  },
+  toolTileGradient: {
+    width: '100%',
+    aspectRatio: 1,
     borderRadius: borderRadius.lg,
-    overflow: 'hidden',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
     ...shadows.md,
   },
-  toolCardGradient: {
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
-    justifyContent: 'space-between' as const,
-    padding: spacing.md,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: 'rgba(100, 100, 255, 0.2)',
+  toolTileIcon: {
+    fontSize: 32,
   },
-  toolCardLeft: {
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
-    gap: spacing.md,
-  },
-  toolIcon: {
-    fontSize: 28,
-  },
-  toolTitle: {
+  toolTileLabel: {
     fontFamily: typography.fontFamily.semiBold,
-    fontSize: typography.fontSize.md,
-    color: colors.textPrimary,
-  },
-  toolSubtitle: {
-    fontFamily: typography.fontFamily.regular,
-    fontSize: typography.fontSize.xs,
-    color: colors.textSecondary,
-    marginTop: 2,
-  },
-  proBadge: {
-    backgroundColor: colors.primary,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-    borderRadius: borderRadius.sm,
-  },
-  proBadgeText: {
-    fontFamily: typography.fontFamily.bold,
     fontSize: 10,
+    color: colors.textSecondary,
+    textAlign: 'center' as const,
+    marginTop: 6,
+    lineHeight: 13,
+  },
+  tileBadge: {
+    position: 'absolute' as const,
+    top: 4,
+    right: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  tileBadgeText: {
+    fontFamily: typography.fontFamily.bold,
+    fontSize: 7,
     color: '#000',
-    letterSpacing: 1,
+    letterSpacing: 0.5,
   },
   sectionDivider: {
     height: 1,

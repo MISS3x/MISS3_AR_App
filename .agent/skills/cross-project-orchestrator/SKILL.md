@@ -79,6 +79,14 @@ Pravidla:
 - **Nezasahuj** — jen informuj a čekej na odpověď
 - **Maximálně 3 položky** — pokud je jich víc, řekni "a dalších N čeká" a nabídni `/sync-check`
 
+### 6. Ruční zápis (příkazy `/push` nebo `/write`)
+
+Když uživatel napíše `/push` nebo `/write`, znamená to, že chce explicitně zapsat aktuální stav/novou funkci do changelogu pro druhý tým.
+1. Shrň, co se udělalo a jaký to má dopad na druhý projekt.
+2. Zapiš nový ⏳ záznam na začátek `CHANGELOG.md`.
+3. Případně aktualizuj `SHARED_CONTRACT.md`, pokud se měnilo schéma nebo API.
+4. Potvrď uživateli, že je zpráva pro druhý tým uložena.
+
 ## Důležité soubory
 
 | Soubor | Cesta | Účel |

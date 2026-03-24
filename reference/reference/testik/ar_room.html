@@ -1,0 +1,464 @@
+
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>testik</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" /> 
+    <meta property="og:title" content="testik" />
+    <meta property="og:description" content="Click to view this AR experience powered by MISS3." />
+    <meta property="og:image" content="https://virtual.miss3.cz/miss3_ar/testik/preview.jpg" />
+    <meta property="og:url" content="https://virtual.miss3.cz/miss3_ar/testik/" />
+    <meta property="og:type" content="website" />
+    <!-- Content Security Policy: Allow unsafe-eval and blobs for MindAR/TensorFlow/Workers -->
+    <meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; script-src * 'unsafe-inline' 'unsafe-eval' data: blob:; connect-src * 'unsafe-inline' 'unsafe-eval' data: blob:; img-src * data: blob: 'unsafe-inline'; worker-src * data: blob: 'unsafe-inline' 'unsafe-eval'; frame-src *; style-src * 'unsafe-inline';">
+
+    <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/c-frame/aframe-extras@7.2.0/dist/aframe-extras.min.js"></script>
+    <script src="https://unpkg.com/aframe-look-at-component@0.8.0/dist/aframe-look-at-component.min.js"></script>
+    <script src="https://unpkg.com/aframe-orbit-controls@1.3.2/dist/aframe-orbit-controls.min.js"></script>
+    
+    <script>
+      // Hotspot Behavior (Click to Show 2D Popup)
+      AFRAME.registerComponent('hotspot-behavior', {
+        schema: {
+            text: {type: 'string', default: ''},
+            textColor: {type: 'color', default: 'black'},
+            frameColor: {type: 'color', default: 'white'}
+        },
+        init: function () {
+            this.el.addEventListener('click', () => {
+                const overlay = document.getElementById('anno-overlay');
+                const content = document.getElementById('anno-content');
+                const textEl = document.getElementById('anno-text');
+                
+                if(overlay && content && textEl) {
+                    // 1. Decode Text
+                    try {
+                        textEl.innerText = decodeURIComponent(this.data.text);
+                    } catch(e) {
+                         textEl.innerText = this.data.text;
+                    }
+                    
+                    // Force text color to dark gray for readability on white background
+                    // (Ignoring the 3D text color which might be white)
+                    textEl.style.color = '#111827'; 
+                    content.style.borderColor = this.data.frameColor;
+                    
+                    // Show Overlay
+                    overlay.style.display = 'flex';
+                }
+            });
+            // Ensure clickable class for cursor
+            this.el.classList.add('clickable');
+        }
+      });
+    </script>
+    </head>
+
+    <style>
+      body { margin: 0; overflow: hidden; font-family: 'Inter', sans-serif; }
+      
+      /* 2D Overlay Popup */
+      #anno-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 10000;
+        display: none; /* Hidden by default */
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.6); /* Darker dim */
+        backdrop-filter: blur(5px);
+        padding: 0; /* Full screen touch area */
+      }
+      
+      #anno-content {
+        background: rgba(255, 255, 255, 0.98);
+        padding: 32px 24px;
+        border-radius: 20px;
+        width: 90vw; /* Fit screen width */
+        max-width: 500px; /* Cap for tablets */
+        text-align: center;
+        box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+        border: 4px solid white; /* Dynamic via JS */
+        transform: scale(0.9);
+        animation: popupIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 20px;
+        
+        /* Scroll if text is huge */
+        max-height: 80vh; 
+        overflow-y: auto;
+      }
+      
+      @keyframes popupIn {
+        to { opacity: 1; transform: scale(1); }
+      }
+
+      #anno-text {
+        font-size: 20px; /* Larger Text */
+        line-height: 1.6;
+        font-weight: 600;
+        color: #1f2937;
+        width: 100%;
+        word-wrap: break-word;
+      }
+
+      #anno-close {
+        background: #ef4444;
+        color: white;
+        border: none;
+        padding: 14px 40px;
+        border-radius: 16px;
+        font-weight: 800;
+        font-size: 16px;
+        cursor: pointer;
+        transition: transform 0.1s, background 0.2s;
+        box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
+        width: 100%; /* Full width button on mobile */
+      }
+      #anno-close:active {
+        transform: scale(0.96);
+        background: #dc2626;
+      }
+
+      /* Loading Overlay */
+      #ar-loader {
+
+        position: fixed;
+        inset: 0;
+        background: #111827;
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        transition: opacity 0.5s;
+        font-family: sans-serif;
+        color: white;
+      }
+      .loader-spinner {
+        width: 40px;
+        height: 40px;
+        border: 4px solid #374151;
+        border-top: 4px solid #3b82f6;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin-bottom: 20px;
+      }
+      .progress-bar-container {
+        width: 200px;
+        height: 6px;
+        background: #374151;
+        border-radius: 3px;
+        overflow: hidden;
+      }
+      .progress-bar-fill {
+        height: 100%;
+        width: 0%;
+        background: #3b82f6;
+        transition: width 0.2s;
+      }
+      @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+      /* Dual Mode UI */
+      #mode-ui {
+        position: fixed;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 1000;
+        display: none; /* Shown via JS */
+      }
+      .mode-btn {
+        background: #2563eb;
+        color: white;
+        border: none;
+        padding: 12px 24px;
+        border-radius: 50px;
+        font-weight: 600;
+        font-size: 16px;
+        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4);
+        cursor: pointer;
+        transition: transform 0.1s;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .mode-btn:active { transform: scale(0.95); }
+
+      /* Landing Page */
+      #landing-page {
+        position: fixed;
+        inset: 0;
+        background: radial-gradient(circle at center, #f3f4f6, #9ca3af);
+        z-index: 10001; /* Above everything */
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 20px;
+      }
+      .landing-card {
+        background: white;
+        padding: 40px;
+        border-radius: 32px;
+        box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        text-align: center;
+        max-width: 90%;
+        width: 340px;
+      }
+      .landing-title {
+        font-size: 24px;
+        font-weight: 800;
+        color: #111827;
+        margin-bottom: 30px;
+      }
+      .big-btn {
+        width: 100%;
+        padding: 16px;
+        font-size: 18px;
+        border-radius: 16px;
+        font-weight: 700;
+        margin-bottom: 16px;
+        cursor: pointer;
+        border: none;
+        transition: transform 0.1s;
+      }
+      .btn-primary { background: #2563eb; color: white; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3); }
+      .btn-secondary { background: #4b5563; color: white; box-shadow: 0 4px 12px rgba(75, 85, 99, 0.3); }
+      .big-btn:active { transform: scale(0.98); }
+
+    </style>
+    <body>
+        <!-- Landing Page Removed -->
+
+        <!-- Navigation -->
+        <div id="mode-ui" style="display: flex;">
+            <button id="home-btn" class="mode-btn" onclick="goHome()">
+                🏠 Home
+            </button>
+        </div>
+
+        <!-- 2D Popup Overlay -->
+        <div id="anno-overlay">
+            <div id="anno-content">
+                <div id="anno-text">Annotation Text Here</div>
+                <button id="anno-close" onclick="document.getElementById('anno-overlay').style.display='none'">CLOSE</button>
+            </div>
+        </div>
+
+        <!-- Loading UI -->
+        <div id="ar-loader">
+          <div class="loader-spinner"></div>
+          <div class="text-sm font-medium mb-1">Loading Experience...</div>
+        </div>
+
+        <script>
+            let currentMode = 'none';
+
+            // Auto-Remove Loader on Load (Safety)
+            window.addEventListener('load', () => {
+                setTimeout(() => {
+                    const l = document.getElementById('ar-loader');
+                    if(l) l.style.opacity = 0;
+                    setTimeout(() => { if(l) l.remove(); }, 500);
+                }, 1000);
+
+                // Auto-Enter AR if Query Param is set
+                const urlParams = new URLSearchParams(window.location.search);
+                if(urlParams.get('mode') === 'ar') {
+                    // Small delay to ensure A-Frame init
+                    setTimeout(() => {
+                        console.log("🚀 Auto-Launching AR Mode...");
+                        enterAR();
+                    }, 500);
+                }
+            });
+        </script>
+
+        <!-- A-Frame Scene -->
+        <a-scene
+            mindar-image="imageTargetSrc: ./targets.mind; autoStart: true; uiError: yes; uiLoading: no; filterMinCF:0.001; filterBeta: 0.1"
+            color-space="sRGB" renderer="colorManagement: true; antialias: true;"
+            vr-mode-ui="enabled: false" device-orientation-permission-ui="enabled: false">
+
+            <!-- MindAR Event Listeners for Debugging -->
+            <script>
+                const scene = document.querySelector('a-scene');
+                if(scene) {
+                    scene.addEventListener('arError', (event) => {
+                        const error = event.detail.error;
+                        console.error("❌ MindAR Error:", error);
+                        
+                        let msg = "AR Error: " + error;
+                        if(error === 'VIDEO_FAIL') {
+                            msg = "📷 Camera Failed: VIDEO_FAIL\n\n1. Check the 🔒/📷 icon in your address bar and ALLOW camera access.\n2. Ensure no other app (Zoom/Teams) is using the camera.\n3. If on Mobile, ensure you are using HTTPS (or localhost).";
+                        }
+                        alert(msg);
+                    });
+                    scene.addEventListener('arReady', () => {
+                        console.log("✅ MindAR Ready");
+                    });
+                }
+            </script>
+    
+            <a-assets>
+                <!-- No assets needed explicitly yet -->
+            </a-assets>
+    
+            <!-- Lights for 3D Mode (Matched to Editor) -->
+            <a-entity id="lighting" position="0 0 0">
+                <a-light type="ambient" color="#ffffff" intensity="0.6"></a-light>
+                <a-light type="directional" color="#ffffff" intensity="1.2" position="5 10 7" cast-shadow="true"></a-light>
+            </a-entity>
+    
+            <a-camera id="camera" position="0 0 0" look-controls="enabled: false">
+                <!-- Cursor for interaction (Raycaster) -->
+                <a-entity cursor="fuse: false; rayOrigin: mouse;" raycaster="far: 10000; objects: .clickable">
+                </a-entity>
+            </a-camera>
+    
+            <!-- AR Content (Anchored to Target) -->
+            <a-entity id="ar-target" mindar-image-target="targetIndex: 0">
+                <a-entity id="ar-content">
+                    <a-entity position="0.0000 0.0000 0.0000" rotation="0 0 0" scale="1.0000 1.0000 1.0000">
+                        <a-gltf-model src="./testik.glb" position="0.0058 0.0000 0.0061" rotation="90 0 0"
+                            animation-mixer on-model-loaded on-model-error>
+                            <!-- Annotations (AR) Nested INSIDE GLTF Model Entity to inherit inner transforms -->
+                            
+        <!-- Annotation 1: ascsdS -->
+        <a-entity position="0.7017 0.6723 0.0494">
+            
+            <!-- Hotspot (Billboarded Circle with Number) -->
+            <a-entity look-at="[camera]" 
+                      class="clickable"
+                      geometry="primitive: circle; radius: 0.05" 
+                      material="color: #ffffff; shader: flat; transparent: true; opacity: 1.0"
+                      hotspot-behavior="text: ascsdS; textColor: #ffffff; frameColor: #ffffff">
+                      
+                      <!-- Child Text Entity  -->
+                      <a-entity position="0 0 0.01" 
+                                text="value: 1; color: black; align: center; width: 0.15000000000000002; wrapCount: 3; anchor: center; baseline: center">
+                      </a-entity>
+            </a-entity>
+        </a-entity>
+                        </a-gltf-model>
+                    </a-entity>
+                </a-entity>
+            </a-entity>
+    
+            <!-- 3D Content (Scene Root, Hidden by default) -->
+            <!-- 3D Content (Scene Root, Hidden by default + Auto Fitting) -->
+
+
+        </a-scene>
+
+        <script>
+            // Simple Navigation Logic
+            function goHome() {
+                window.location.href = 'index.html';
+            }
+        </script>
+
+
+    <!-- STATUS BAR -->
+    <div id="status-bar" style="
+        position: fixed; 
+        top: 0; 
+        left: 0; 
+        width: 100%; 
+        padding: 4px 10px;
+        background: rgba(0,0,0,0.6); 
+        color: white; 
+        font-family: sans-serif; 
+        font-size: 12px; 
+        z-index: 20000; 
+        pointer-events: none;
+        text-align: center;
+        display: none;">
+        Ready
+    </div>
+
+    <script>
+        function log(msg) {
+            console.log(msg);
+            const d = document.getElementById('status-bar');
+            if(d) {
+                d.innerText = msg;
+                d.style.display = 'block';
+                // Auto-hide after 3s (unless it's an error)
+                if(!msg.startsWith('❌')) {
+                    setTimeout(() => { d.style.display = 'none'; }, 3000);
+                }
+            }
+        }
+
+        // 1. Check File Existence (Logic Updated for Version 3.6)
+        const rawModelUrl = "./testik.glb";
+        let modelUrl = rawModelUrl;
+        
+        // If it starts with blob:, use it as is. If not, prepend ./
+        if(!modelUrl.startsWith('blob:')) {
+            modelUrl = "./" + modelUrl;
+        }
+
+        log("Checking Model URL: " + modelUrl);
+        
+        // Skip HEAD check for Blobs (It will fail CORS or Protocol check, and is unnecessary)
+        if(modelUrl.startsWith('blob:')) {
+             log("ℹ️ Blob URL detected. Skipping HEAD verification.");
+        } else {
+            fetch(modelUrl, {method: 'HEAD'})
+                .then(res => {
+                    if(res.ok) log("✅ GET Model OK: " + res.status + " (" + res.headers.get('content-length') + " bytes)");
+                    else       log("❌ GET Model FAILED: " + res.status);
+                })
+                .catch(e => log("❌ GET Model ERROR: " + e.message));
+        }
+
+        // Debug Components
+        AFRAME.registerComponent('on-model-loaded', {
+            init: function() {
+                this.el.addEventListener('model-loaded', () => {
+                    log("✅ Event: model-loaded fired!");
+                    const mesh = this.el.getObject3D('mesh');
+                    if(mesh) {
+                        const box = new THREE.Box3().setFromObject(mesh);
+                        const size = new THREE.Vector3();
+                        box.getSize(size);
+                        log("📏 Bounds: " + size.x.toFixed(2) + " x " + size.y.toFixed(2) + " x " + size.z.toFixed(2));
+                        log("📍 Position: " + mesh.position.toArray().join(", "));
+                        log("🔍 Scale: " + mesh.scale.toArray().join(", "));
+                        
+                        // Force update material to ensure it handles lights
+                        mesh.traverse(cancel => {
+                            if(cancel.isMesh) {
+                                cancel.castShadow = true;
+                                cancel.receiveShadow = true;
+                                if(cancel.material) cancel.material.needsUpdate = true;
+                            }
+                        });
+                    } else {
+                        log("⚠️ Event fired but NO MESH found.");
+                    }
+                });
+            }
+        });
+        AFRAME.registerComponent('on-model-error', {
+            init: function() {
+                this.el.addEventListener('model-error', (e) => {
+                    log("❌ Event: model-error: " + e.detail.src);
+                    alert("Error: Model failed to load. Please check file format.");
+                });
+            }
+        });
+    </script>
+
+
+</body>
+
+</html>

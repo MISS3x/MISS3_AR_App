@@ -11,7 +11,11 @@ import * as FileSystem from 'expo-file-system/legacy';
 
 type FlowState = 'idle' | 'scanning' | 'processing' | 'uploading' | 'done' | 'error';
 
-export default function ObjectCaptureScreen({ navigation }: any) {
+export default function ObjectCaptureScreen({ navigation, route }: any) {
+  const params = route?.params || {};
+  const roomProjectId = params.projectId;
+  const roomCameraTransform = params.roomCameraTransform || [];
+  const returnToRoomScan = params.returnToRoomScan || false;
   const insets = useSafeAreaInsets();
   
   const [flowState, setFlowState] = useState<FlowState>('idle');
@@ -131,8 +135,8 @@ export default function ObjectCaptureScreen({ navigation }: any) {
       
       const { data, error } = await supabase.storage
         .from('mesh-scans')
-        .upload(`objects/${userId}/${fileName}`, byteArray, {
-          contentType: 'model/vnd.usdz+zip',
+        .upload(`${userId}/objects/${fileName}`, byteArray, {
+          contentType: 'application/octet-stream',
           cacheControl: '3600',
           upsert: false,
         });
@@ -151,11 +155,9 @@ export default function ObjectCaptureScreen({ navigation }: any) {
         file_size: modelSize,
         format: 'usdz',
         status: 'completed',
-        metadata: {
-          imageCount,
-          capturedAt: new Date().toISOString(),
-          device: 'ios',
-        },
+        project_id: roomProjectId || null,
+        room_transform: roomCameraTransform.length > 0 ? roomCameraTransform : null,
+        scan_type: returnToRoomScan ? 'detail' : 'standalone',
       });
 
       if (dbError) {
@@ -166,6 +168,13 @@ export default function ObjectCaptureScreen({ navigation }: any) {
       setProgress(1);
       setFlowState('done');
       setStatusText('Upload complete! ✅');
+      
+      // Auto-return to Room Scan if launched from detail capture
+      if (returnToRoomScan) {
+        setTimeout(() => {
+          navigation.goBack();
+        }, 1500);
+      }
       
     } catch (e: any) {
       setFlowState('error');

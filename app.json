@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "MISS3 AR",
-    "slug": "miss3-ar",
+    "slug": "miss3-ar-dev",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -41,7 +41,7 @@
     },
     "extra": {
       "eas": {
-        "projectId": "b80f9f32-df51-4348-951f-27d6ce65d7f3"
+        "projectId": "1913d2a0-63ca-4499-a2be-6cd9c2a4c4bf"
       }
     },
     "plugins": [
@@ -56,6 +56,6 @@
       "./plugins/withSceneReconstruction",
       "expo-asset"
     ],
-    "owner": "radimx"
+    "owner": "miss3ar2"
   }
 }

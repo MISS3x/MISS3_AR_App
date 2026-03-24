@@ -152,6 +152,7 @@ const ARNodeComponent = ({ obj, index, setPlacedObjects, arSceneRef }: { obj: AR
 
   return (
     <ViroNode
+      key={`node_${obj.id}`}
       ref={nodeRef}
       scale={currentScale.current}
       rotation={currentRotation.current}
@@ -163,6 +164,7 @@ const ARNodeComponent = ({ obj, index, setPlacedObjects, arSceneRef }: { obj: AR
       onRotate={onRotate}
     >
       <Viro3DObject
+        key={`mesh_${obj.id}`}
         ref={modelRef}
         source={{ uri: obj.localUri }}
         type={(() => {
@@ -222,6 +224,9 @@ const ARScene = (props: any) => {
   const lastAnchorUpdate = useRef<number>(0);
   const arSceneRef = useRef<any>(null);
 
+  // Track lowest horizontal plane Y as best floor estimate
+  const floorY = useRef<number | null>(null);
+
   // Continuous floor hit-test for ghost preview
   const lastGhostUpdate = useRef<number>(0);
   
@@ -234,7 +239,23 @@ const ARScene = (props: any) => {
     
     arSceneRef.current.getCameraOrientationAsync().then((cam: any) => {
       if (!cam || !cam.position || !cam.forward) return;
-      // Cast a ray from camera forward 3m toward floor for a better projection distance
+
+      // Project camera forward onto horizontal floor plane
+      // If floorY is known, calculate intersection of camera ray with Y=floorY
+      const fy = floorY.current;
+      if (fy !== null && cam.forward[1] !== 0) {
+        // t = (floorY - camY) / forwardY
+        const t = (fy - cam.position[1]) / cam.forward[1];
+        if (t > 0.3 && t < 10) {
+          // Valid forward intersection with floor
+          const gx = cam.position[0] + cam.forward[0] * t;
+          const gz = cam.position[2] + cam.forward[2] * t;
+          setGhostPosition([gx, fy, gz]);
+          return;
+        }
+      }
+
+      // Fallback: hit test with a 3m forward ray
       const rayEnd = [
         cam.position[0] + cam.forward[0] * 3,
         cam.position[1] + cam.forward[1] * 3,
@@ -242,8 +263,6 @@ const ARScene = (props: any) => {
       ];
       arSceneRef.current.performARHitTestWithPosition(rayEnd).then((results: any) => {
         if (results && results.length > 0) {
-          // Reverting to the logic that worked well for the user:
-          // Find any hit with a roughly horizontal rotation, regardless of plane typing.
           const floorHit = results.find((hit: any) => {
             if (!hit.transform || !hit.transform.rotation) return false;
             const rot = hit.transform.rotation;
@@ -252,10 +271,14 @@ const ARScene = (props: any) => {
           
           if (floorHit) {
             const pos = floorHit.transform.position || rayEnd;
+            // Update floorY from successful hit
+            if (floorY.current === null || pos[1] < floorY.current) {
+              floorY.current = pos[1];
+            }
             setGhostPosition([pos[0], pos[1], pos[2]]);
           } else {
-             // Fallback: If no flat hit point found, project safely to 1.5m below camera height.
-             const fallbackY = cam.position[1] - 1.5;
+             // Fallback: project to known floor or 1.5m below camera
+             const fallbackY = floorY.current !== null ? floorY.current : cam.position[1] - 1.5;
              setGhostPosition([rayEnd[0], fallbackY, rayEnd[2]]);
           }
         }
@@ -268,8 +291,24 @@ const ARScene = (props: any) => {
     // Objects should only be placed using the UI button.
   };
 
+  const updateFloorYFromPlane = (anchor: any) => {
+    // Track horizontal planes to find real floor Y
+    if (anchor.type === "plane" && anchor.alignment === 0) {
+      // alignment 0 = horizontal
+      const py = anchor.position?.[1] ?? anchor.center?.[1];
+      if (typeof py === 'number') {
+        if (floorY.current === null || py < floorY.current) {
+          floorY.current = py;
+        }
+      }
+    }
+  };
+
   const onAnchorFound = (anchor: any) => {
-    if (anchor.type === "plane") setPlanes((prev: any) => ({ ...prev, [anchor.anchorId]: anchor }));
+    if (anchor.type === "plane") {
+      setPlanes((prev: any) => ({ ...prev, [anchor.anchorId]: anchor }));
+      updateFloorYFromPlane(anchor);
+    }
   };
   
   const onAnchorUpdated = (anchor: any) => {
@@ -279,6 +318,7 @@ const ARScene = (props: any) => {
          setPlanes((prev: any) => ({ ...prev, [anchor.anchorId]: anchor }));
          lastAnchorUpdate.current = now;
       }
+      updateFloorYFromPlane(anchor);
     }
   };
   
@@ -389,10 +429,10 @@ const ARScene = (props: any) => {
       )}
 
       {/* Demo ghost — local Crystal primitive when no model selected but reticle active */}
-      {!pendingModelContext && ghostPosition && crystalUri && (
+      {!pendingModelContext && ghostPosition && (
         <ViroNode position={ghostPosition} opacity={0.65}>
           <Viro3DObject
-            source={{ uri: crystalUri }}
+            source={require('../../assets/models/crystal_pbr.glb')}
             position={[0, 0, 0]}
             scale={[1, 1, 1]}
             type="GLB"
@@ -465,12 +505,7 @@ export default function SandboxARScreen({ navigation }: any) {
   }, []);
 
   const preloadCrystal = async () => {
-    try {
-      const asset = await Asset.fromModule(require('../../assets/models/crystal_pbr.glb')).downloadAsync();
-      setCrystalUri(asset.localUri || asset.uri);
-    } catch (err) {
-      console.log("Failed to preload crystal:", err);
-    }
+    // Legacy async load removed — we use require() directly in the Viro component now.
   };
 
   const handleSelectModelFromCatalog = async (model: CatalogModel) => {
@@ -530,10 +565,17 @@ export default function SandboxARScreen({ navigation }: any) {
     const offsetArgs = pendingModelContext.model_transform?.modelOffset;
     const parsedOffset: [number, number, number] = offsetArgs ? [offsetArgs.x, offsetArgs.y, offsetArgs.z] : [0, 0, 0];
 
+    // ViroReact SceneKit reuses the same native node for identical source URIs.
+    // Append a unique query param so each placed instance gets its own node.
+    const instanceId = Math.random().toString(36).substring(7);
+    const uniqueUri = pendingModelContext.localUri.includes('?')
+      ? `${pendingModelContext.localUri}&inst=${instanceId}`
+      : `${pendingModelContext.localUri}?inst=${instanceId}`;
+
     const newObject: ARPlacedObject = {
-      id: Math.random().toString(36).substring(7),
+      id: instanceId,
       title: pendingModelContext.title || 'Model',
-      localUri: pendingModelContext.localUri,
+      localUri: uniqueUri,
       position: [frozenX, frozenY, frozenZ] as [number, number, number],
       scale: parsedScale,
       rotation: parsedRotation,

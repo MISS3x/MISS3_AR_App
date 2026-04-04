@@ -15,6 +15,8 @@ export interface ARRulerNativeViewProps extends ViewProps {
   showWireframe?: boolean;
   /** Whether to show RoomPlan visualization (walls, doors, windows, objects) */
   showRoomPlan?: boolean;
+  /** Whether to show measurement spheres and dimensions next to drawn lines */
+  showVisualGuides?: boolean;
   /** Async command to load remote shapes */
   loadRemoteObjects?: (objects: any[]) => Promise<number>;
 }

@@ -17,6 +17,7 @@ Pod::Spec.new do |s|
 
   s.dependency 'ExpoModulesCore'
   s.dependency 'GLTFSceneKit'
+  s.dependency 'Euclid', '~> 0.8'
 
   s.source_files = "**/*.{h,m,mm,swift,hpp,cpp}"
 end

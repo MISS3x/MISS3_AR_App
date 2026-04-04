@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "MISS3 AR",
-    "slug": "miss3-ar-dev",
+    "slug": "miss3-ar-sketch",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -41,7 +41,7 @@
     },
     "extra": {
       "eas": {
-        "projectId": "1913d2a0-63ca-4499-a2be-6cd9c2a4c4bf"
+        "projectId": "45ad2b41-aaae-48e7-83f1-1683c37a8610"
       }
     },
     "plugins": [
@@ -56,6 +56,6 @@
       "./plugins/withSceneReconstruction",
       "expo-asset"
     ],
-    "owner": "miss3ar2"
+    "owner": "janulee_p"
   }
 }

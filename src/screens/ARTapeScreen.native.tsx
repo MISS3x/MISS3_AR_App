@@ -145,7 +145,10 @@ export default function ARTapeScreen({ navigation }: any) {
       floorplanTimerRef.current = setInterval(async () => {
         try {
           const rpData = await rulerRef.current?.exportRoomPlanData();
-          if (rpData && fpId) {
+          console.log('[Tape] 📡 exportRoomPlanData returned:', JSON.stringify(rpData).substring(0, 200));
+          const wallCount = rpData?.walls?.length || 0;
+          console.log('[Tape] wallCount=', wallCount, 'fpId=', fpId);
+          if (rpData && fpId && wallCount > 0) {
             const { error: updErr } = await supabase.from('ar_tape_floorplan').update({
               walls: rpData.walls || [],
               floors: rpData.floors || [],
@@ -154,9 +157,13 @@ export default function ARTapeScreen({ navigation }: any) {
               updated_at: new Date().toISOString(),
             }).eq('id', fpId);
             if (updErr) console.warn('[Tape] UPDATE floorplan FAILED:', updErr.message);
-            else console.log('[Tape] Floorplan synced:', (rpData.walls||[]).length, 'walls');
+            else console.log('[Tape] ✅ Floorplan synced:', wallCount, 'walls');
+          } else if (wallCount === 0) {
+            console.log('[Tape] ⏳ No walls detected yet — RoomPlan still scanning');
           }
-        } catch {}
+        } catch (e: any) {
+          console.warn('[Tape] Floorplan sync error:', e.message);
+        }
       }, 15000);
     } catch (e: any) {
       console.warn('[Tape] Background floorplan start failed:', e.message);
@@ -519,99 +526,8 @@ export default function ARTapeScreen({ navigation }: any) {
   }
 
   // ═══════════════════════════════════
-  // PHASE: PICK TYPE (over AR background)
-  // ═══════════════════════════════════
-  if (phase === 'pickType') {
-    return (
-      <View style={[S.container, { paddingTop: insets.top }]}>
-        <View style={S.arBg}>
-          <ARRulerNativeView ref={rulerRef} style={{ flex: 1 }}
-            showMesh={false} showWireframe={false} showRoomPlan={true} drawingMode="free" />
-        </View>
-
-        <KeyboardAvoidingView style={S.setupOverlay} behavior="padding">
-          <ScrollView contentContainerStyle={{ justifyContent: 'center', flexGrow: 1 }} keyboardShouldPersistTaps="handled">
-            <View style={S.setupCard}>
-              <Text style={S.setupTitle}>📏 Nové měření</Text>
-
-              <Text style={S.label}>TYP</Text>
-              <View style={S.row}>
-                {(['length', 'area', 'volume', 'count'] as MeasureType[]).map(t => (
-                  <TouchableOpacity key={t}
-                    style={[S.chip, groupType === t && S.chipActive]}
-                    onPress={() => {
-                      setGroupType(t); setWallMode(false);
-                      setGroupName(generateAutoName(t));
-                    }}
-                  >
-                    <Text style={[S.chipText, groupType === t && S.chipTextActive]}>
-                      {TYPE_META[t].icon} {TYPE_META[t].label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              {groupType === 'area' && (
-                <TouchableOpacity
-                  style={[S.chip, wallMode && S.chipActive, { marginTop: 8, alignSelf: 'flex-start' }]}
-                  onPress={() => setWallMode(!wallMode)}
-                >
-                  <Text style={[S.chipText, wallMode && S.chipTextActive]}>🧱 Stěna (délka × výška)</Text>
-                </TouchableOpacity>
-              )}
-
-              <Text style={[S.label, { marginTop: 14 }]}>NÁZEV</Text>
-              <TextInput style={S.input} value={groupName} onChangeText={setGroupName}
-                placeholder="auto" placeholderTextColor="#555" />
-
-              <TouchableOpacity style={[S.greenBtn, { marginTop: 14 }]} onPress={() => {
-                if (!groupName) setGroupName(generateAutoName(groupType));
-                setSubs([]); setCurrentOp(null); setCountInput('');
-                handleStartMeasuring();
-              }}>
-                <Text style={S.greenBtnText}>▶ {groupType === 'count' ? 'Počítat' : 'Měřit'}</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Completed groups with sub-measurement details */}
-            {groups.length > 0 && (
-              <View style={[S.card, { marginTop: 12, marginHorizontal: 0 }]}>
-                <Text style={S.label}>HOTOVÁ MĚŘENÍ ({groups.length})</Text>
-                {groups.map((g, i) => (
-                  <View key={i} style={{ marginBottom: 10, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)', paddingBottom: 8 }}>
-                    <View style={S.logRow}>
-                      <Text style={S.logType}>{TYPE_META[g.measure_type]?.icon}</Text>
-                      <Text style={S.logName} numberOfLines={1}>{g.name}</Text>
-                      <Text style={[S.logValue, { fontSize: 14, fontWeight: 'bold' }]}>{fmt(g.total)} {g.unit}</Text>
-                    </View>
-                    {/* Sub-measurements */}
-                    {g.subs.length > 0 && g.subs.map((sub, si) => (
-                      <View key={si} style={{ flexDirection: 'row', paddingLeft: 28, paddingVertical: 2 }}>
-                        <Text style={{ color: '#666', fontSize: 10, width: 20, fontFamily: 'monospace' }}>
-                          {sub.operation || ' '}
-                        </Text>
-                        <Text style={{ color: '#AAA', fontSize: 10, flex: 1 }}>
-                          {fmt(sub.value)} {sub.unit}
-                          {sub.points?.length > 0 && ` (${sub.points.length} bodů)`}
-                        </Text>
-                      </View>
-                    ))}
-                  </View>
-                ))}
-              </View>
-            )}
-          </ScrollView>
-
-          <TouchableOpacity style={{ padding: 12, alignItems: 'center' }} onPress={() => navigation.goBack()}>
-            <Text style={{ color: '#666' }}>← Zpět</Text>
-          </TouchableOpacity>
-        </KeyboardAvoidingView>
-      </View>
-    );
-  }
-
-  // ═══════════════════════════════════
-  // PHASE: MEASURING (fullscreen AR)
+  // PHASE: MEASURING / AFTERCLOSE / PICKTYPE
+  // All three share ONE persistent ARRulerNativeView so tracking never resets
   // ═══════════════════════════════════
   const canFinish = (groupType === 'length' && pointCount >= 2) ||
     (groupType === 'area' && wallMode && liveLength > 0) ||
@@ -620,7 +536,7 @@ export default function ARTapeScreen({ navigation }: any) {
 
   const needsClose = pointCount >= 3 && (groupType === 'area' && !wallMode || groupType === 'volume') && !isClosed;
 
-  if (phase === 'measuring' || phase === 'afterClose') {
+  if (phase === 'pickType' || phase === 'measuring' || phase === 'afterClose') {
     // COUNT type — calculator input (no AR points)
     if (groupType === 'count') {
       return (
@@ -722,6 +638,86 @@ export default function ARTapeScreen({ navigation }: any) {
               {subs.length > 0 && currentOp ? ` ${currentOp}` : ''}
             </Text>
           </View>
+
+          {/* ── PICK TYPE OVERLAY (shows form on top of live AR) ── */}
+          {phase === 'pickType' && (
+            <KeyboardAvoidingView style={S.setupOverlay} behavior="padding" pointerEvents="box-none">
+              <ScrollView contentContainerStyle={{ justifyContent: 'center', flexGrow: 1 }} keyboardShouldPersistTaps="handled">
+                <View style={S.setupCard}>
+                  <Text style={S.setupTitle}>📏 Nové měření</Text>
+
+                  <Text style={S.label}>TYP</Text>
+                  <View style={S.row}>
+                    {(['length', 'area', 'volume', 'count'] as MeasureType[]).map(t => (
+                      <TouchableOpacity key={t}
+                        style={[S.chip, groupType === t && S.chipActive]}
+                        onPress={() => {
+                          setGroupType(t); setWallMode(false);
+                          setGroupName(generateAutoName(t));
+                        }}
+                      >
+                        <Text style={[S.chipText, groupType === t && S.chipTextActive]}>
+                          {TYPE_META[t].icon} {TYPE_META[t].label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
+                  {groupType === 'area' && (
+                    <TouchableOpacity
+                      style={[S.chip, wallMode && S.chipActive, { marginTop: 8, alignSelf: 'flex-start' }]}
+                      onPress={() => setWallMode(!wallMode)}
+                    >
+                      <Text style={[S.chipText, wallMode && S.chipTextActive]}>🧱 Stěna (délka × výška)</Text>
+                    </TouchableOpacity>
+                  )}
+
+                  <Text style={[S.label, { marginTop: 14 }]}>NÁZEV</Text>
+                  <TextInput style={S.input} value={groupName} onChangeText={setGroupName}
+                    placeholder="auto" placeholderTextColor="#555" />
+
+                  <TouchableOpacity style={[S.greenBtn, { marginTop: 14 }]} onPress={() => {
+                    if (!groupName) setGroupName(generateAutoName(groupType));
+                    setSubs([]); setCurrentOp(null); setCountInput('');
+                    handleStartMeasuring();
+                  }}>
+                    <Text style={S.greenBtnText}>▶ {groupType === 'count' ? 'Počítat' : 'Měřit'}</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Completed groups list */}
+                {groups.length > 0 && (
+                  <View style={[S.card, { marginTop: 12, marginHorizontal: 0 }]}>
+                    <Text style={S.label}>HOTOVÁ MĚŘENÍ ({groups.length})</Text>
+                    {groups.map((g, i) => (
+                      <View key={i} style={{ marginBottom: 10, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)', paddingBottom: 8 }}>
+                        <View style={S.logRow}>
+                          <Text style={S.logType}>{TYPE_META[g.measure_type]?.icon}</Text>
+                          <Text style={S.logName} numberOfLines={1}>{g.name}</Text>
+                          <Text style={[S.logValue, { fontSize: 14, fontWeight: 'bold' }]}>{fmt(g.total)} {g.unit}</Text>
+                        </View>
+                        {g.subs.length > 0 && g.subs.map((sub, si) => (
+                          <View key={si} style={{ flexDirection: 'row', paddingLeft: 28, paddingVertical: 2 }}>
+                            <Text style={{ color: '#666', fontSize: 10, width: 20, fontFamily: 'monospace' }}>
+                              {sub.operation || ' '}
+                            </Text>
+                            <Text style={{ color: '#AAA', fontSize: 10, flex: 1 }}>
+                              {fmt(sub.value)} {sub.unit}
+                              {sub.points?.length > 0 && ` (${sub.points.length} bodů)`}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </ScrollView>
+
+              <TouchableOpacity style={{ padding: 12, alignItems: 'center' }} onPress={() => navigation.goBack()}>
+                <Text style={{ color: '#666' }}>← Zpět</Text>
+              </TouchableOpacity>
+            </KeyboardAvoidingView>
+          )}
 
           {/* ── MEASURING OVERLAYS ── */}
           {phase === 'measuring' && (

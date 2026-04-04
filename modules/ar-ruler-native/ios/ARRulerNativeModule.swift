@@ -25,6 +25,10 @@ public class ARRulerNativeModule: Module {
         view.setShowWire(show: show)
       }
 
+      Prop("showVisualGuides") { (view: ARRulerNativeView, show: Bool) in
+        view.showVisualGuides = show
+      }
+
       Prop("showRoomPlan") { (view: ARRulerNativeView, show: Bool) in
         view.setShowRoomPlan(show: show)
       }
@@ -39,6 +43,34 @@ public class ARRulerNativeModule: Module {
 
       AsyncFunction("addPoint") { (view: ARRulerNativeView) in
         view.addPoint()
+      }
+
+      AsyncFunction("addPointAt") { (view: ARRulerNativeView, x: Float, y: Float, z: Float) in
+        view.addPointAt(x: x, y: y, z: z)
+      }
+
+      AsyncFunction("getCursorPosition") { (view: ARRulerNativeView) -> [String: Float]? in
+        return view.getCursorPosition()
+      }
+
+      AsyncFunction("clearCurrentShape") { (view: ARRulerNativeView) in
+        view.clearCurrentShape()
+      }
+
+      AsyncFunction("setPreviewShape") { (view: ARRulerNativeView, type: String, points: [[String: Float]]) in
+        view.setPreviewShape(type: type, points: points)
+      }
+
+      AsyncFunction("clearShapePreview") { (view: ARRulerNativeView) in
+        view.clearShapePreview()
+      }
+
+      AsyncFunction("startFreehandStroke") { (view: ARRulerNativeView, thickness: Float, colorHex: String) in
+        view.startFreehandStroke(thickness: thickness, colorHex: colorHex)
+      }
+
+      AsyncFunction("stopFreehandStroke") { (view: ARRulerNativeView, label: String) -> [String: Any]? in
+        return view.stopFreehandStroke(label: label)
       }
 
       AsyncFunction("getCurrentShapes") { (view: ARRulerNativeView) -> [[String: Any]] in
@@ -239,6 +271,98 @@ public class ARRulerNativeModule: Module {
 
       AsyncFunction("takePhoto") { (view: ARRulerNativeView, promise: Promise) in
         view.takePhoto(promise: promise)
+      }
+
+      // --- Sketch 3D CSG ---
+
+      AsyncFunction("addPrimitive") { (view: ARRulerNativeView, type: String, size: Float, label: String) -> [String: Any]? in
+        return view.addPrimitive(type: type, size: size, label: label)
+      }
+
+      AsyncFunction("addPrimitiveAt") { (view: ARRulerNativeView, type: String, position: [String: Float], dimensions: [String: Float], label: String) -> [String: Any]? in
+        return view.addPrimitiveAt(type: type, position: position, dimensions: dimensions, label: label)
+      }
+
+      AsyncFunction("extrudeSketchShape") { (view: ARRulerNativeView, points: [[String: Float]], height: Float, label: String) -> [String: Any]? in
+        return view.extrudeSketchShape(points: points, height: height, label: label)
+      }
+
+      AsyncFunction("selectSketchShapeAtCenter") { (view: ARRulerNativeView) -> [String: Any]? in
+        return view.selectSketchShapeAtCenter()
+      }
+
+      AsyncFunction("selectSketchShapeById") { (view: ARRulerNativeView, id: String) in
+        view.selectSketchShapeById(id: id)
+      }
+
+      AsyncFunction("toggleSketchShapeSelection") { (view: ARRulerNativeView, id: String) in
+        view.toggleSketchShapeSelection(id: id)
+      }
+
+      AsyncFunction("deselectAllSketchShapes") { (view: ARRulerNativeView) in
+        view.deselectAllSketchShapes()
+      }
+
+      AsyncFunction("getSelectedSketchShapeIds") { (view: ARRulerNativeView) -> [String] in
+        return view.getSelectedSketchShapeIds()
+      }
+
+      AsyncFunction("getSketchShapes") { (view: ARRulerNativeView) -> [[String: Any]] in
+        return view.getSketchShapes()
+      }
+
+      AsyncFunction("moveSketchShape") { (view: ARRulerNativeView, id: String, dx: Float, dy: Float, dz: Float) in
+        view.moveSketchShape(id: id, dx: dx, dy: dy, dz: dz)
+      }
+
+      AsyncFunction("rotateSketchShape") { (view: ARRulerNativeView, id: String, rx: Float, ry: Float, rz: Float) in
+        view.rotateSketchShape(id: id, rx: rx, ry: ry, rz: rz)
+      }
+
+      AsyncFunction("scaleSketchShape") { (view: ARRulerNativeView, id: String, sx: Float, sy: Float, sz: Float) in
+        view.scaleSketchShape(id: id, sx: sx, sy: sy, sz: sz)
+      }
+
+      AsyncFunction("booleanSubtract") { (view: ARRulerNativeView, keepId: String, cutId: String) -> [String: Any]? in
+        return view.booleanSubtract(keepId: keepId, cutId: cutId)
+      }
+
+      AsyncFunction("booleanUnion") { (view: ARRulerNativeView, idA: String, idB: String) -> [String: Any]? in
+        return view.booleanUnion(idA: idA, idB: idB)
+      }
+
+      AsyncFunction("booleanIntersect") { (view: ARRulerNativeView, idA: String, idB: String) -> [String: Any]? in
+        return view.booleanIntersect(idA: idA, idB: idB)
+      }
+
+      AsyncFunction("pushPullFace") { (view: ARRulerNativeView, shapeId: String, facePoints: [[String: Float]], depth: Float) -> [String: Any]? in
+        return view.pushPullFace(shapeId: shapeId, facePoints: facePoints, depth: depth)
+      }
+
+      AsyncFunction("deleteSketchShape") { (view: ARRulerNativeView, id: String) -> Bool in
+        return view.deleteSketchShape(id: id)
+      }
+
+      AsyncFunction("deleteSelectedSketchShapes") { (view: ARRulerNativeView) -> Int in
+        return view.deleteSelectedSketchShapes()
+      }
+
+      // --- Cut / Subdivision Tool ---
+
+      AsyncFunction("hitTestMeshElement") { (view: ARRulerNativeView) -> [String: Any]? in
+        return view.hitTestMeshElement()
+      }
+
+      AsyncFunction("showSnapHighlight") { (view: ARRulerNativeView, x: Float, y: Float, z: Float, snapType: String) in
+        view.showSnapHighlight(x: x, y: y, z: z, snapType: snapType)
+      }
+
+      AsyncFunction("clearSnapHighlight") { (view: ARRulerNativeView) in
+        view.clearSnapHighlight()
+      }
+
+      AsyncFunction("applyCutLine") { (view: ARRulerNativeView, shapeId: String, pointA: [String: Any], pointB: [String: Any]) -> Bool in
+        return view.applyCutLine(shapeId: shapeId, pointA: pointA, pointB: pointB)
       }
     }
   }

@@ -23,6 +23,7 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   public var isWallMode: Bool { drawingMode == .wall }
   private var meshUIColor: UIColor = UIColor(red: 0.0, green: 1.0, blue: 0.4, alpha: 1.0) // Matrix green
   private var scannerLightNode: SCNLight?
+  public var showVisualGuides: Bool = true
   
   // Tron Blue for floor mode
   private let tronBlue = UIColor(red: 0.2, green: 0.8, blue: 1.0, alpha: 1.0)
@@ -61,6 +62,13 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   private var currentPolygon: [SCNVector3] = []
   private var closedShapes: [[String: Any]] = []
   
+  // Freehand Tool Mode
+  private var isFreehandActive = false
+  private var currentFreehandThickness: Float = 0.05
+  private var currentFreehandColor: UIColor = .white
+  private var freehandPoints: [SCNVector3] = []
+  private var freehandLineNodes: [SCNNode] = []
+  
   // Camera Trajectory
   private var cameraTrajectory: [[String: Float]] = []
   private var lastTrajectoryTime: TimeInterval = 0
@@ -90,6 +98,14 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   private var pointerNode: SCNNode?
   private var distanceLabel: SCNNode?
   private var axisNodes: [SCNNode] = [] // X, Y, Z axis lines
+
+  // Shape preview (real-time wireframe while drawing)
+  private var previewNode: SCNNode?
+  private var previewType: String? = nil
+  private var previewPoints: [SCNVector3] = []
+
+  // Sketch 3D Shape Manager (CSG)
+  private lazy var sketchManager: SketchShapeManager = SketchShapeManager(sceneView: arView)
 
   required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
@@ -385,6 +401,44 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
       pointerColor = floorY != nil ? tronBlue : .yellow
     }
 
+    // --- OVERRIDE FOR 3D HEIGHT PULLING ---
+    // If we are currently placing the height of a 3D object, unlock from the floor
+    // and intersect the camera view with a vertical plane erected at the base center!
+    var overridenPosition: SCNVector3? = nil
+    if let type = previewType, previewPoints.count >= 2 {
+       let needsHeight = (type == "box" && previewPoints.count >= 3) || 
+                         (type == "cylinder" && previewPoints.count >= 2) || 
+                         (type == "cone" && previewPoints.count >= 2) || 
+                         (type == "pyramid" && previewPoints.count >= 2) ||
+                         (type == "ellipse" && previewPoints.count >= 2)
+       
+       if needsHeight {
+           let basePt = previewPoints[0] 
+           // Normal of the vertical plane facing the camera
+           let nx = cameraPos.x - basePt.x
+           let nz = cameraPos.z - basePt.z
+           let len = sqrt(nx*nx + nz*nz)
+           if len > 0.001 {
+               let n = SCNVector3(nx/Float(len), 0, nz/Float(len))
+               let dotNDir = n.x * cameraDir.x + n.y * cameraDir.y + n.z * cameraDir.z
+               if abs(dotNDir) > 0.001 {
+                   let dotNBase = n.x * (basePt.x - cameraPos.x) + n.y * (basePt.y - cameraPos.y) + n.z * (basePt.z - cameraPos.z)
+                   let t = dotNBase / dotNDir
+                   if t > 0 && t < 20.0 {
+                       overridenPosition = SCNVector3(cameraPos.x + t * cameraDir.x,
+                                                      cameraPos.y + t * cameraDir.y,
+                                                      cameraPos.z + t * cameraDir.z)
+                       surfaceNormal = n
+                   }
+               }
+           }
+       }
+    }
+    
+    if let ov = overridenPosition {
+        hitPosition = ov
+    }
+
     guard let position = hitPosition else {
       pointerNode?.isHidden = true
       ghostLineNode?.isHidden = true
@@ -402,6 +456,9 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
     // Update ghost preview line from last polygon point to cursor
     updateGhostLine(to: position)
     
+    // Update real-time shape preview wireframe
+    updateShapePreview(cursorPos: position)
+    
     // Scale cursor with clamped range
     let dist = distance(from: cameraPos, to: position)
     let rawScale = 1.0 / max(0.1, dist)
@@ -413,6 +470,44 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
       let invS = 1.0 / scaleFactor * 0.005
       distanceLabel?.scale = SCNVector3(invS, invS, invS)
     }
+    
+    // ----------- FREEHAND CONTINUOUS DRAWING -----------
+    if isFreehandActive {
+        if freehandPoints.isEmpty {
+            freehandPoints.append(position)
+        } else if let lastP = freehandPoints.last, distance(from: lastP, to: position) > 0.02 {
+            // Draw visual line segment
+            let vector = SCNVector3(position.x - lastP.x, position.y - lastP.y, position.z - lastP.z)
+            let length = distance(from: lastP, to: position)
+            
+            let plane = SCNPlane(width: CGFloat(currentFreehandThickness), height: CGFloat(length))
+            plane.firstMaterial?.diffuse.contents = currentFreehandColor
+            plane.firstMaterial?.lightingModel = .constant
+            plane.firstMaterial?.isDoubleSided = true
+            plane.firstMaterial?.readsFromDepthBuffer = true
+            
+            let segNode = SCNNode(geometry: plane)
+            segNode.position = SCNVector3((lastP.x + position.x) / 2, (lastP.y + position.y) / 2, (lastP.z + position.z) / 2)
+            
+            let yAxis = SCNVector3(0, 1, 0)
+            var axis = crossProduct(v1: yAxis, v2: vector)
+            let axisLength = sqrt(axis.x*axis.x + axis.y*axis.y + axis.z*axis.z)
+            var angle = acos(dotProduct(v1: yAxis, v2: vector) / length)
+            
+            if axisLength < 0.001 {
+                axis = SCNVector3(1, 0, 0)
+                angle = vector.y < 0 ? Float.pi : 0
+            } else {
+                axis = SCNVector3(axis.x/axisLength, axis.y/axisLength, axis.z/axisLength)
+            }
+            segNode.rotation = SCNVector4(axis.x, axis.y, axis.z, angle)
+            
+            arView.scene.rootNode.addChildNode(segNode)
+            freehandLineNodes.append(segNode)
+            freehandPoints.append(position)
+        }
+    }
+    // ----------- --------------------------- -----------
     
     if let textGeo = distanceLabel?.geometry as? SCNText {
         textGeo.string = String(format: "%.2fm", dist)
@@ -547,6 +642,490 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
     addPolygonPoint(at: hitPos, color: color)
   }
 
+  /// Place a point at specific world coordinates (for computed shapes like rect, circle)
+  func addPointAt(x: Float, y: Float, z: Float) {
+    let pos = SCNVector3(x, y, z)
+    let color: UIColor
+    switch drawingMode {
+    case .floor:  color = tronBlue
+    case .free:   color = freeOrange
+    case .wall:   color = wallPink
+    }
+    addPolygonPoint(at: pos, color: color)
+  }
+
+  /// Get current cursor position without adding a point
+  func getCursorPosition() -> [String: Float]? {
+    guard let pointer = pointerNode, !pointer.isHidden else { return nil }
+    let pos = pointer.position
+    return ["x": pos.x, "y": pos.y, "z": pos.z]
+  }
+
+  /// Clear the current in-progress shape (discard all current polygon points)
+  func clearCurrentShape() {
+    // Remove current polygon point nodes
+    for node in pointNodes {
+        node.removeFromParentNode()
+    }
+    pointNodes.removeAll()
+    
+    // Remove current lines
+    for line in lineNodes {
+        line.removeFromParentNode()
+    }
+    lineNodes.removeAll()
+    
+    // Clear polygon data
+    currentPolygon.removeAll()
+    
+    // Remove ghost line
+    ghostLineNode?.removeFromParentNode()
+    ghostLineNode = nil
+    ghostDistLabel?.removeFromParentNode()
+    ghostDistLabel = nil
+    
+    // Clear preview
+    clearShapePreview()
+  }
+
+  // MARK: - Freehand 3D Sketch
+
+  func startFreehandStroke(thickness: Float, colorHex: String) {
+      self.isFreehandActive = true
+      self.currentFreehandThickness = thickness
+      self.currentFreehandColor = parseColor(hex: colorHex)
+      self.freehandPoints = []
+      self.freehandLineNodes = []
+  }
+
+  private func parseColor(hex: String) -> UIColor {
+      var hexSanitized = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+      hexSanitized = hexSanitized.replacingOccurrences(of: "#", with: "")
+      var rgb: UInt64 = 0
+      Scanner(string: hexSanitized).scanHexInt64(&rgb)
+      return UIColor(
+          red: CGFloat((rgb & 0xFF0000) >> 16) / 255.0,
+          green: CGFloat((rgb & 0x00FF00) >> 8) / 255.0,
+          blue: CGFloat(rgb & 0x0000FF) / 255.0,
+          alpha: 1.0
+      )
+  }
+
+  func stopFreehandStroke(label: String) -> [String: Any]? {
+      self.isFreehandActive = false
+      guard freehandPoints.count > 1 else { return nil }
+      
+      let container = SCNNode()
+      container.name = "freehand_group"
+      
+      // Group visual segments
+      for n in freehandLineNodes {
+          n.removeFromParentNode()
+          container.addChildNode(n)
+      }
+      arView.scene.rootNode.addChildNode(container)
+      
+      let shapeId = UUID().uuidString
+      let pointsDict = freehandPoints.map { ["x": $0.x, "y": $0.y, "z": $0.z] }
+      
+      let shape = sketchManager.addFreehandShape(
+          id: shapeId,
+          node: container,
+          label: label,
+          color: currentFreehandColor,
+          sourcePoints: pointsDict,
+          thickness: currentFreehandThickness
+      )
+      
+      freehandPoints.removeAll()
+      freehandLineNodes.removeAll()
+      
+      return sketchManager.shapeToDict(shape)
+  }
+
+  // MARK: - Real-time Shape Preview
+
+  /// Called from JS after each intermediate tap to set up preview
+  func setPreviewShape(type: String, points: [[String: Float]]) {
+    previewType = type
+    previewPoints = points.map { p in
+      SCNVector3(p["x"] ?? 0, p["y"] ?? 0, p["z"] ?? 0)
+    }
+  }
+
+  /// Remove preview wireframe
+  func clearShapePreview() {
+    previewNode?.removeFromParentNode()
+    previewNode = nil
+    previewType = nil
+    previewPoints.removeAll()
+  }
+
+  /// Called every frame to update the wireframe preview based on cursor position
+  private func updateShapePreview(cursorPos: SCNVector3) {
+    guard let type = previewType, !previewPoints.isEmpty else { return }
+
+    // Remove old preview
+    previewNode?.removeFromParentNode()
+
+    let wireColor = UIColor.white
+    let node = SCNNode()
+    node.name = "shape_preview"
+
+    switch type {
+
+    // ═══ LINE: just a line from A to cursor ═══
+    case "line":
+      if previewPoints.count == 1 {
+        addWireLine(to: node, from: previewPoints[0], to: cursorPos, color: wireColor)
+      }
+
+    // ═══ RECT: 3-step rotatable (A, B=edge, C=width) ═══
+    case "rect":
+      if previewPoints.count == 1 {
+        // Step 1: line from A to cursor (top edge preview)
+        addWireLine(to: node, from: previewPoints[0], to: cursorPos, color: wireColor)
+      } else if previewPoints.count >= 2 {
+        // Step 2: full rect with perpendicular width
+        let a = previewPoints[0]
+        let b = previewPoints[1]
+        let abx = b.x - a.x; let abz = b.z - a.z
+        let abLen = sqrt(abx * abx + abz * abz)
+        guard abLen > 0.001 else { break }
+        let perpx = -abz / abLen; let perpz = abx / abLen
+        let acx = cursorPos.x - a.x; let acz = cursorPos.z - a.z
+        let w = acx * perpx + acz * perpz
+        let c0 = a
+        let c1 = b
+        let c2 = SCNVector3(b.x + perpx * w, a.y, b.z + perpz * w)
+        let c3 = SCNVector3(a.x + perpx * w, a.y, a.z + perpz * w)
+        addWireLine(to: node, from: c0, to: c1, color: wireColor)
+        addWireLine(to: node, from: c1, to: c2, color: wireColor)
+        addWireLine(to: node, from: c2, to: c3, color: wireColor)
+        addWireLine(to: node, from: c3, to: c0, color: wireColor)
+      }
+
+    // ═══ SQUARE: 1 point placed, cursor = opposite corner ═══
+    case "square":
+      let a = previewPoints[0]
+      let b = squareB(a: a, cursor: cursorPos)
+      let c0 = a
+      let c1 = SCNVector3(b.x, a.y, a.z)
+      let c2 = SCNVector3(b.x, a.y, b.z)
+      let c3 = SCNVector3(a.x, a.y, b.z)
+      addWireLine(to: node, from: c0, to: c1, color: wireColor)
+      addWireLine(to: node, from: c1, to: c2, color: wireColor)
+      addWireLine(to: node, from: c2, to: c3, color: wireColor)
+      addWireLine(to: node, from: c3, to: c0, color: wireColor)
+
+    // ═══ CIRCLE: 1 point (center), cursor = radius ═══
+    case "circle":
+      let center = previewPoints[0]
+      let radius = sqrt(pow(cursorPos.x - center.x, 2) + pow(cursorPos.z - center.z, 2))
+      let segments = 32
+      for i in 0..<segments {
+        let a1 = Float(i) / Float(segments) * Float.pi * 2
+        let a2 = Float(i + 1) / Float(segments) * Float.pi * 2
+        let p1 = SCNVector3(center.x + cos(a1) * radius, center.y, center.z + sin(a1) * radius)
+        let p2 = SCNVector3(center.x + cos(a2) * radius, center.y, center.z + sin(a2) * radius)
+        addWireLine(to: node, from: p1, to: p2, color: wireColor)
+      }
+
+    // ═══ ELLIPSE: center → width → height ═══
+    case "ellipse":
+      if previewPoints.count == 1 {
+        // Step 1: Center fixed, mapping circle as width preview
+        let center = previewPoints[0]
+        let radius = distance(from: center, to: cursorPos)
+        let segments = 32
+        for i in 0..<segments {
+          let a1 = Float(i) / Float(segments) * Float.pi * 2
+          let a2 = Float(i + 1) / Float(segments) * Float.pi * 2
+          let p1 = SCNVector3(center.x + cos(a1) * radius, center.y, center.z + sin(a1) * radius)
+          let p2 = SCNVector3(center.x + cos(a2) * radius, center.y, center.z + sin(a2) * radius)
+          addWireLine(to: node, from: p1, to: p2, color: wireColor)
+        }
+      } else if previewPoints.count >= 2 {
+        // Step 2: Center and width fixed, cursor defines height (depth)
+        let center = previewPoints[0]
+        let widthP = previewPoints[1]
+        let radiusX = distance(from: center, to: widthP) // width
+        let radiusZ = distance(from: center, to: cursorPos) // height
+        let segments = 32
+        let angleOffset = atan2(widthP.z - center.z, widthP.x - center.x) // align with width vector
+        for i in 0..<segments {
+          let a1 = Float(i) / Float(segments) * Float.pi * 2
+          let a2 = Float(i + 1) / Float(segments) * Float.pi * 2
+          
+          // Parametric ellipse x = a*cos(t), z = b*sin(t)
+          let xl1 = radiusX * cos(a1); let zl1 = radiusZ * sin(a1)
+          let xl2 = radiusX * cos(a2); let zl2 = radiusZ * sin(a2)
+          
+          // Rotate by angleOffset
+          let p1x = center.x + (xl1 * cos(angleOffset) - zl1 * sin(angleOffset))
+          let p1z = center.z + (xl1 * sin(angleOffset) + zl1 * cos(angleOffset))
+          
+          let p2x = center.x + (xl2 * cos(angleOffset) - zl2 * sin(angleOffset))
+          let p2z = center.z + (xl2 * sin(angleOffset) + zl2 * cos(angleOffset))
+          
+          let p1 = SCNVector3(p1x, center.y, p1z)
+          let p2 = SCNVector3(p2x, center.y, p2z)
+          
+          addWireLine(to: node, from: p1, to: p2, color: wireColor)
+        }
+      }
+
+    // ═══ BOX: 4-step (A→B edge, width, height) ═══
+    case "box":
+      if previewPoints.count == 1 {
+        // Step 1: line A→cursor (top edge)
+        addWireLine(to: node, from: previewPoints[0], to: cursorPos, color: wireColor)
+      } else if previewPoints.count == 2 {
+        // Step 2: rect base with perpendicular width
+        let ba = previewPoints[0]; let bb = previewPoints[1]
+        let abx = bb.x - ba.x; let abz = bb.z - ba.z
+        let abLen = sqrt(abx * abx + abz * abz)
+        guard abLen > 0.001 else { break }
+        let perpx = -abz / abLen; let perpz = abx / abLen
+        let acx = cursorPos.x - ba.x; let acz = cursorPos.z - ba.z
+        let w = acx * perpx + acz * perpz
+        let bc0 = ba; let bc1 = bb
+        let bc2 = SCNVector3(bb.x + perpx * w, ba.y, bb.z + perpz * w)
+        let bc3 = SCNVector3(ba.x + perpx * w, ba.y, ba.z + perpz * w)
+        addWireLine(to: node, from: bc0, to: bc1, color: wireColor)
+        addWireLine(to: node, from: bc1, to: bc2, color: wireColor)
+        addWireLine(to: node, from: bc2, to: bc3, color: wireColor)
+        addWireLine(to: node, from: bc3, to: bc0, color: wireColor)
+      } else if previewPoints.count >= 3 {
+        // Step 3: full box, pulling height
+        let ba = previewPoints[0]; let bb = previewPoints[1]; let bc = previewPoints[2]
+        let abx = bb.x - ba.x; let abz = bb.z - ba.z
+        let abLen = sqrt(abx * abx + abz * abz)
+        guard abLen > 0.001 else { break }
+        let perpx = -abz / abLen; let perpz = abx / abLen
+        let acx = bc.x - ba.x; let acz = bc.z - ba.z
+        let w = acx * perpx + acz * perpz
+        let bc0 = ba; let bc1 = bb
+        let bc2 = SCNVector3(bb.x + perpx * w, ba.y, bb.z + perpz * w)
+        let bc3 = SCNVector3(ba.x + perpx * w, ba.y, ba.z + perpz * w)
+        let h = cursorPos.y - ba.y
+        let bt0 = SCNVector3(bc0.x, ba.y + h, bc0.z)
+        let bt1 = SCNVector3(bc1.x, ba.y + h, bc1.z)
+        let bt2 = SCNVector3(bc2.x, ba.y + h, bc2.z)
+        let bt3 = SCNVector3(bc3.x, ba.y + h, bc3.z)
+        // Bottom
+        addWireLine(to: node, from: bc0, to: bc1, color: wireColor)
+        addWireLine(to: node, from: bc1, to: bc2, color: wireColor)
+        addWireLine(to: node, from: bc2, to: bc3, color: wireColor)
+        addWireLine(to: node, from: bc3, to: bc0, color: wireColor)
+        // Top
+        addWireLine(to: node, from: bt0, to: bt1, color: wireColor)
+        addWireLine(to: node, from: bt1, to: bt2, color: wireColor)
+        addWireLine(to: node, from: bt2, to: bt3, color: wireColor)
+        addWireLine(to: node, from: bt3, to: bt0, color: wireColor)
+        // Verticals
+        addWireLine(to: node, from: bc0, to: bt0, color: wireColor)
+        addWireLine(to: node, from: bc1, to: bt1, color: wireColor)
+        addWireLine(to: node, from: bc2, to: bt2, color: wireColor)
+        addWireLine(to: node, from: bc3, to: bt3, color: wireColor)
+      }
+
+    // ═══ SPHERE: 1 point (center), cursor = radius ═══
+    case "sphere":
+      let center = previewPoints[0]
+      let radius = sqrt(pow(cursorPos.x - center.x, 2) + pow(cursorPos.y - center.y, 2) + pow(cursorPos.z - center.z, 2))
+      let segments = 24
+      // Draw 3 circles (XY, XZ, YZ)
+      for i in 0..<segments {
+        let a1 = Float(i) / Float(segments) * Float.pi * 2
+        let a2 = Float(i + 1) / Float(segments) * Float.pi * 2
+        // XZ circle
+        let px1 = SCNVector3(center.x + cos(a1) * radius, center.y, center.z + sin(a1) * radius)
+        let px2 = SCNVector3(center.x + cos(a2) * radius, center.y, center.z + sin(a2) * radius)
+        addWireLine(to: node, from: px1, to: px2, color: wireColor)
+        // XY circle
+        let py1 = SCNVector3(center.x + cos(a1) * radius, center.y + sin(a1) * radius, center.z)
+        let py2 = SCNVector3(center.x + cos(a2) * radius, center.y + sin(a2) * radius, center.z)
+        addWireLine(to: node, from: py1, to: py2, color: wireColor)
+        // YZ circle
+        let pz1 = SCNVector3(center.x, center.y + cos(a1) * radius, center.z + sin(a1) * radius)
+        let pz2 = SCNVector3(center.x, center.y + cos(a2) * radius, center.z + sin(a2) * radius)
+        addWireLine(to: node, from: pz1, to: pz2, color: wireColor)
+      }
+
+    // ═══ CYLINDER: center → radius, then height ═══
+    case "cylinder":
+      if previewPoints.count == 1 {
+        // Circle base preview
+        let center = previewPoints[0]
+        let radius = sqrt(pow(cursorPos.x - center.x, 2) + pow(cursorPos.z - center.z, 2))
+        let segments = 24
+        for i in 0..<segments {
+          let a1 = Float(i) / Float(segments) * Float.pi * 2
+          let a2 = Float(i + 1) / Float(segments) * Float.pi * 2
+          let p1 = SCNVector3(center.x + cos(a1) * radius, center.y, center.z + sin(a1) * radius)
+          let p2 = SCNVector3(center.x + cos(a2) * radius, center.y, center.z + sin(a2) * radius)
+          addWireLine(to: node, from: p1, to: p2, color: wireColor)
+        }
+      } else if previewPoints.count == 2 {
+        // Full cylinder
+        let center = previewPoints[0]
+        let radius = sqrt(pow(previewPoints[1].x - center.x, 2) + pow(previewPoints[1].z - center.z, 2))
+        let h = cursorPos.y - center.y
+        let segments = 24
+        for i in 0..<segments {
+          let a1 = Float(i) / Float(segments) * Float.pi * 2
+          let a2 = Float(i + 1) / Float(segments) * Float.pi * 2
+          // Bottom circle
+          let b1 = SCNVector3(center.x + cos(a1) * radius, center.y, center.z + sin(a1) * radius)
+          let b2 = SCNVector3(center.x + cos(a2) * radius, center.y, center.z + sin(a2) * radius)
+          addWireLine(to: node, from: b1, to: b2, color: wireColor)
+          // Top circle
+          let t1 = SCNVector3(center.x + cos(a1) * radius, center.y + h, center.z + sin(a1) * radius)
+          let t2 = SCNVector3(center.x + cos(a2) * radius, center.y + h, center.z + sin(a2) * radius)
+          addWireLine(to: node, from: t1, to: t2, color: wireColor)
+          // Vertical lines (every 6th segment)
+          if i % 6 == 0 {
+            addWireLine(to: node, from: b1, to: t1, color: wireColor)
+          }
+        }
+      }
+
+    // ═══ CONE: center → radius, then height ═══
+    case "cone", "pyramid":
+      if previewPoints.count == 1 {
+        // Base circle/rect
+        let center = previewPoints[0]
+        let radius = sqrt(pow(cursorPos.x - center.x, 2) + pow(cursorPos.z - center.z, 2))
+        let segments = 24
+        for i in 0..<segments {
+          let a1 = Float(i) / Float(segments) * Float.pi * 2
+          let a2 = Float(i + 1) / Float(segments) * Float.pi * 2
+          let p1 = SCNVector3(center.x + cos(a1) * radius, center.y, center.z + sin(a1) * radius)
+          let p2 = SCNVector3(center.x + cos(a2) * radius, center.y, center.z + sin(a2) * radius)
+          addWireLine(to: node, from: p1, to: p2, color: wireColor)
+        }
+      } else if previewPoints.count == 2 {
+        // Full cone with apex
+        let center = previewPoints[0]
+        let radius = sqrt(pow(previewPoints[1].x - center.x, 2) + pow(previewPoints[1].z - center.z, 2))
+        let h = cursorPos.y - center.y
+        let apex = SCNVector3(center.x, center.y + h, center.z)
+        let segments = 24
+        for i in 0..<segments {
+          let a1 = Float(i) / Float(segments) * Float.pi * 2
+          let a2 = Float(i + 1) / Float(segments) * Float.pi * 2
+          let b1 = SCNVector3(center.x + cos(a1) * radius, center.y, center.z + sin(a1) * radius)
+          let b2 = SCNVector3(center.x + cos(a2) * radius, center.y, center.z + sin(a2) * radius)
+          addWireLine(to: node, from: b1, to: b2, color: wireColor)
+          if i % 4 == 0 {
+            addWireLine(to: node, from: b1, to: apex, color: wireColor)
+          }
+        }
+      }
+
+    default:
+      break
+    }
+
+    arView.scene.rootNode.addChildNode(node)
+    previewNode = node
+  }
+
+  /// Helper: make square B from cursor
+  private func squareB(a: SCNVector3, cursor: SCNVector3) -> SCNVector3 {
+    let dx = cursor.x - a.x
+    let dz = cursor.z - a.z
+    let side = max(abs(dx), abs(dz))
+    return SCNVector3(a.x + (dx >= 0 ? side : -side), a.y, a.z + (dz >= 0 ? side : -side))
+  }
+
+  /// Helper: add CAD-style diagonal hatch lines inside a quadrilateral
+  private func addHatchLines(to parent: SCNNode, corners: [SCNVector3], color: UIColor, spacing: Float = 0.04) {
+    guard corners.count == 4 else { return }
+    let hatchColor = color.withAlphaComponent(0.35)
+    // Axis-aligned bounding box
+    let minX = min(corners[0].x, corners[1].x, corners[2].x, corners[3].x)
+    let maxX = max(corners[0].x, corners[1].x, corners[2].x, corners[3].x)
+    let minZ = min(corners[0].z, corners[1].z, corners[2].z, corners[3].z)
+    let maxZ = max(corners[0].z, corners[1].z, corners[2].z, corners[3].z)
+    let y = corners[0].y
+    let diag = sqrt(pow(maxX - minX, 2) + pow(maxZ - minZ, 2))
+    let steps = Int(diag / spacing)
+    
+    // Draw diagonal lines at 45° across the quad
+    for i in stride(from: -steps, through: steps, by: 1) {
+      let offset = Float(i) * spacing
+      let p1 = SCNVector3(minX + offset, y, minZ)
+      let p2 = SCNVector3(minX + offset + diag, y, minZ + diag)
+      // Clip line to quad using simple parametric clipping
+      if let (clipped1, clipped2) = clipLineToQuad(p1: p1, p2: p2, corners: corners, y: y) {
+        addWireLine(to: parent, from: clipped1, to: clipped2, color: hatchColor, radius: 0.001)
+      }
+    }
+  }
+
+  /// Clip a line segment to a convex quadrilateral (simple approach)
+  private func clipLineToQuad(p1: SCNVector3, p2: SCNVector3, corners: [SCNVector3], y: Float) -> (SCNVector3, SCNVector3)? {
+    // Use parametric intersection with quad edges
+    var tMin: Float = 0, tMax: Float = 1
+    let dx = p2.x - p1.x, dz = p2.z - p1.z
+    
+    for i in 0..<4 {
+      let e1 = corners[i], e2 = corners[(i + 1) % 4]
+      let ex = e2.x - e1.x, ez = e2.z - e1.z
+      let nx = -ez, nz = ex // inward normal (assuming CW)
+      
+      let denom = nx * dx + nz * dz
+      let dist = nx * (p1.x - e1.x) + nz * (p1.z - e1.z)
+      
+      if abs(denom) < 0.0001 {
+        if dist > 0 { return nil } // parallel outside
+        continue
+      }
+      let t = -dist / denom
+      if denom < 0 {
+        tMin = max(tMin, t)
+      } else {
+        tMax = min(tMax, t)
+      }
+      if tMin > tMax { return nil }
+    }
+    
+    if tMin > tMax { return nil }
+    let r1 = SCNVector3(p1.x + dx * tMin, y, p1.z + dz * tMin)
+    let r2 = SCNVector3(p1.x + dx * tMax, y, p1.z + dz * tMax)
+    let len = sqrt(pow(r2.x - r1.x, 2) + pow(r2.z - r1.z, 2))
+    if len < 0.005 { return nil }
+    return (r1, r2)
+  }
+
+  /// Helper: draw a thick glowing wireframe line between two points
+  private func addWireLine(to parent: SCNNode, from: SCNVector3, to: SCNVector3, color: UIColor, radius: CGFloat = 0.003) {
+    let dx = to.x - from.x
+    let dy = to.y - from.y
+    let dz = to.z - from.z
+    let length = sqrt(dx*dx + dy*dy + dz*dz)
+    guard length > 0.001 else { return }
+    
+    let cylinder = SCNCylinder(radius: radius, height: CGFloat(length))
+    let mat = SCNMaterial()
+    mat.diffuse.contents = color
+    mat.emission.contents = color  // glow
+    mat.lightingModel = .constant
+    mat.readsFromDepthBuffer = false // ALWAYS VISIBLE (no occlusion)
+    cylinder.materials = [mat]
+    
+    let lineNode = SCNNode(geometry: cylinder)
+    lineNode.position = SCNVector3(
+      (from.x + to.x) / 2,
+      (from.y + to.y) / 2,
+      (from.z + to.z) / 2
+    )
+    lineNode.look(at: SCNVector3(to.x, to.y, to.z), up: SCNVector3(0, 1, 0), localFront: SCNVector3(0, 1, 0))
+    parent.addChildNode(lineNode)
+  }
+
   func setCeiling() {
     guard let pointer = pointerNode, !pointer.isHidden else { return }
     self.ceilingY = pointer.position.y
@@ -603,15 +1182,19 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
     
     currentPolygon.append(snappedPos)
     allPlacedPoints.append(snappedPos)
-    drawSphere(at: snappedPos, color: color)
+    if showVisualGuides {
+        drawSphere(at: snappedPos, color: color)
+    }
     
     if currentPolygon.count > 1 {
       let prevPos = currentPolygon[currentPolygon.count - 2]
       drawLine(from: prevPos, to: snappedPos, color: color)
 
       let length = distance(from: prevPos, to: snappedPos)
-      let midPoint = SCNVector3((prevPos.x + snappedPos.x)/2, (prevPos.y + snappedPos.y)/2, (prevPos.z + snappedPos.z)/2)
-      drawText(text: String(format: "%.2fm", length), at: midPoint)
+      if showVisualGuides {
+          let midPoint = SCNVector3((prevPos.x + snappedPos.x)/2, (prevPos.y + snappedPos.y)/2, (prevPos.z + snappedPos.z)/2)
+          drawText(text: String(format: "%.2fm", length), at: midPoint)
+      }
     }
     
     // Clear ghost line (will be redrawn next frame)
@@ -1412,11 +1995,21 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
 
   // MARK: - Start Room Scan (shared AR session for correct coordinates)
   func startRoomScan() {
+    print("[RoomPlan] startRoomScan() called — roomPlanController is nil? \(roomPlanController == nil)")
     if #available(iOS 16.0, *) {
         if let rpc = roomPlanController as? RoomPlanController {
             rpc.start(arSession: arView.session)
-            print("[RoomPlan] User started room scan (shared AR session)")
+            print("[RoomPlan] ✅ User started room scan (shared AR session)")
+        } else {
+            print("[RoomPlan] ❌ roomPlanController cast failed — creating new one")
+            let rpc = RoomPlanController()
+            rpc.sceneView = arView
+            self.roomPlanController = rpc
+            rpc.start(arSession: arView.session)
+            print("[RoomPlan] ✅ Created new RoomPlanController and started scan")
         }
+    } else {
+        print("[RoomPlan] ❌ iOS 16+ not available")
     }
   }
 
@@ -3113,6 +3706,159 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
     }
     session.run(configuration, options: [.resetTracking])
   }
+
+  // MARK: - Sketch 3D CSG Methods
+
+  func addPrimitive(type: String, size: Float, label: String) -> [String: Any]? {
+    guard let pointer = pointerNode, !pointer.isHidden else { return nil }
+    let pos = pointer.position
+    let position = simd_float3(pos.x, pos.y, pos.z)
+
+    var shape: SketchShape?
+    switch type {
+    case "cube":
+      shape = sketchManager.addBox(at: position, size: size, label: label)
+    case "sphere":
+      shape = sketchManager.addSphere(at: position, radius: size / 2, label: label)
+    case "cylinder":
+      shape = sketchManager.addCylinder(at: position, radius: size / 2, height: size, label: label)
+    case "cone":
+      shape = sketchManager.addCone(at: position, radius: size / 2, height: size, label: label)
+    case "torus":
+      shape = sketchManager.addTorus(at: position, majorRadius: size / 2, minorRadius: size / 6, label: label)
+    default:
+      return nil
+    }
+
+    guard let s = shape else { return nil }
+    return sketchManager.shapeToDict(s)
+  }
+
+  /// Add a primitive at an explicit position with explicit dimensions
+  func addPrimitiveAt(type: String, position: [String: Float], dimensions: [String: Float], label: String) -> [String: Any]? {
+    let pos = simd_float3(
+      position["x"] ?? 0,
+      position["y"] ?? 0,
+      position["z"] ?? 0
+    )
+    let w = dimensions["width"] ?? 1.0
+    let h = dimensions["height"] ?? 1.0
+    let d = dimensions["depth"] ?? w
+    let r = dimensions["radius"] ?? w / 2
+
+    var shape: SketchShape?
+    switch type {
+    case "cube":
+      shape = sketchManager.addBox(at: pos, size: max(w, h, d), label: label)
+      // Rescale to actual dimensions
+      if let idx = sketchManager.shapes.indices.last {
+        sketchManager.scaleShape(id: sketchManager.shapes[idx].id, sx: w / max(w,h,d), sy: h / max(w,h,d), sz: d / max(w,h,d))
+      }
+    case "sphere":
+      shape = sketchManager.addSphere(at: pos, radius: r, label: label)
+    case "cylinder":
+      shape = sketchManager.addCylinder(at: pos, radius: r, height: h, label: label)
+    case "cone":
+      shape = sketchManager.addCone(at: pos, radius: r, height: h, label: label)
+    default:
+      return nil
+    }
+
+    guard let s = shape else { return nil }
+    return sketchManager.shapeToDict(s)
+  }
+
+  func extrudeSketchShape(points: [[String: Float]], height: Float, label: String) -> [String: Any]? {
+    guard let shape = sketchManager.extrudePolygon(points: points, height: height, label: label) else { return nil }
+    return sketchManager.shapeToDict(shape)
+  }
+
+  func selectSketchShapeAtCenter() -> [String: Any]? {
+    let center = CGPoint(x: arView.bounds.midX, y: arView.bounds.midY)
+    guard let shape = sketchManager.hitTestSelect(at: center) else { return nil }
+    return sketchManager.shapeToDict(shape)
+  }
+
+  func selectSketchShapeById(id: String) {
+    sketchManager.selectShape(id: id)
+  }
+
+  func toggleSketchShapeSelection(id: String) {
+    sketchManager.toggleSelection(id: id)
+  }
+
+  func deselectAllSketchShapes() {
+    sketchManager.deselectAll()
+  }
+
+  func getSelectedSketchShapeIds() -> [String] {
+    return sketchManager.getSelectedShapes().map { $0.id }
+  }
+
+  func getSketchShapes() -> [[String: Any]] {
+    return sketchManager.exportShapes()
+  }
+
+  func moveSketchShape(id: String, dx: Float, dy: Float, dz: Float) {
+    sketchManager.moveShape(id: id, dx: dx, dy: dy, dz: dz)
+  }
+
+  func rotateSketchShape(id: String, rx: Float, ry: Float, rz: Float) {
+    sketchManager.rotateShape(id: id, rx: rx, ry: ry, rz: rz)
+  }
+
+  func scaleSketchShape(id: String, sx: Float, sy: Float, sz: Float) {
+    sketchManager.scaleShape(id: id, sx: sx, sy: sy, sz: sz)
+  }
+
+  func booleanSubtract(keepId: String, cutId: String) -> [String: Any]? {
+    guard let shape = sketchManager.booleanSubtract(keepId: keepId, cutId: cutId) else { return nil }
+    return sketchManager.shapeToDict(shape)
+  }
+
+  func booleanUnion(idA: String, idB: String) -> [String: Any]? {
+    guard let shape = sketchManager.booleanUnion(idA: idA, idB: idB) else { return nil }
+    return sketchManager.shapeToDict(shape)
+  }
+
+  func booleanIntersect(idA: String, idB: String) -> [String: Any]? {
+    guard let shape = sketchManager.booleanIntersect(idA: idA, idB: idB) else { return nil }
+    return sketchManager.shapeToDict(shape)
+  }
+
+  func pushPullFace(shapeId: String, facePoints: [[String: Float]], depth: Float) -> [String: Any]? {
+    guard let shape = sketchManager.pushPull(shapeId: shapeId, facePoints: facePoints, depth: depth) else { return nil }
+    return sketchManager.shapeToDict(shape)
+  }
+
+  func deleteSketchShape(id: String) -> Bool {
+    return sketchManager.deleteShape(id: id)
+  }
+
+  func deleteSelectedSketchShapes() -> Int {
+    return sketchManager.deleteSelected()
+  }
+
+  // MARK: - Cut / Subdivision Tool
+
+  func hitTestMeshElement() -> [String: Any]? {
+    let center = CGPoint(x: arView.bounds.midX, y: arView.bounds.midY)
+    return sketchManager.hitTestMeshElement(at: center)
+  }
+
+  func showSnapHighlight(x: Float, y: Float, z: Float, snapType: String) {
+    let pos = simd_float3(x, y, z)
+    let type = SketchShapeManager.MeshSnapType(rawValue: snapType) ?? .face
+    sketchManager.showSnapHighlight(at: pos, snapType: type)
+  }
+
+  func clearSnapHighlight() {
+    sketchManager.clearSnapHighlight()
+  }
+
+  func applyCutLine(shapeId: String, pointA: [String: Any], pointB: [String: Any]) -> Bool {
+    return sketchManager.applyCutLine(shapeId: shapeId, pointA: pointA, pointB: pointB)
+  }
 }
 
 // MARK: - UIColor Hex Extension
@@ -3181,8 +3927,10 @@ class RoomPlanController: NSObject, RoomCaptureSessionDelegate, NSCoding {
         let config = RoomCaptureSession.Configuration()
         if #available(iOS 17.0, *) {
             session = RoomCaptureSession(arSession: arSession)
+            print("[RoomPlan] Session created with SHARED arSession (iOS 17+)")
         } else {
             session = RoomCaptureSession()
+            print("[RoomPlan] Session created WITHOUT shared arSession (iOS 16 fallback)")
         }
         session?.delegate = self
         session?.run(configuration: config)
@@ -3190,7 +3938,7 @@ class RoomPlanController: NSObject, RoomCaptureSessionDelegate, NSCoding {
         finalizedRoom = nil
         capturedRoomData = nil
         sceneView?.scene.rootNode.addChildNode(roomRootNode)
-        print("[RoomPlan] Session started (no overlay)")
+        print("[RoomPlan] ✅ Session started, delegate set, running. session=\(session != nil)")
     }
     
     // MARK: - Stop and remove overlay
@@ -3216,6 +3964,7 @@ class RoomPlanController: NSObject, RoomCaptureSessionDelegate, NSCoding {
     
     func captureSession(_ session: RoomCaptureSession, didUpdate room: CapturedRoom) {
         self.latestRoom = room
+        print("[RoomPlan] 📡 didUpdate: \(room.walls.count) walls, \(room.doors.count) doors")
         inferCeilingAndFloor(from: room)
         // Re-enabled: render RoomPlan data in SceneKit (shared AR session = correct coords)
         DispatchQueue.main.async { [weak self] in
@@ -3539,7 +4288,11 @@ class RoomPlanController: NSObject, RoomCaptureSessionDelegate, NSCoding {
     // MARK: - Export structured RoomPlan data
     
     func exportRoomPlanData() -> [String: Any] {
-        guard let room = latestRoom else { return [:] }
+        guard let room = latestRoom else {
+            print("[RoomPlan] ⚠️ exportRoomPlanData: latestRoom is nil — no data yet")
+            return [:]
+        }
+        print("[RoomPlan] 📤 exportRoomPlanData: \(room.walls.count) walls, \(room.doors.count) doors")
         
         var walls: [[String: Any]] = []
         for wall in room.walls {

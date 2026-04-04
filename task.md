@@ -60,7 +60,13 @@
   *Added toggle button in header. Created Blinn clay material and applied conditionally to `Viro3DObject`.*
 - [x] **20. Distance measuring & Floor plan radar**
   *Added a real-time `showMap` 2D radar overlay calculating Eucledian distance mapping `X` and `Z` relative coordinates from the user origin.*
-- [x] **21. Enhanced Map: Wall Perimeters & Inter-Object Distances**
+- [x] **21. AR Sketch Development**
+  - [x] Implement boolean `showVisualGuides` logic natively to turn off dimensions and spheres.
+  - [x] Fix `getRoomPlanData` to `exportRoomPlanData` bug for background sync.
+  - [x] Add continuous `Freehand Tool` with thickness slider natively and in React UI.
+  - [x] Validate and configure `Box` / `Cylinder` / `Cone` step-by-step real-time AR resizing (base dimensions + vertical push height).
+  - [x] Add an `[END POLYLINE]` button to seal multi-click polylines.
+  - [x] Add `Ellipse` real-time parametric outline into AR preview engine.
 - [x] **22. SVG Map Export Button**
 - [x] **23. ARKit People/Object Depth Occlusion**
 - [x] **24. Tap-To-Place Mechanics**

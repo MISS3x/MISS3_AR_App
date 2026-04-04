@@ -17,7 +17,7 @@ const wallPink = '#FF4D99';
 export default function ARRulerScreen({ navigation }: any) {
   const insets = useSafeAreaInsets();
   const rulerRef = useRef<any>(null);
-  
+
   const [pointCount, setPointCount] = useState(0);
   const [roomHeight, setRoomHeight] = useState<number | null>(null);
   const [floorDetected, setFloorDetected] = useState(false);
@@ -26,13 +26,13 @@ export default function ARRulerScreen({ navigation }: any) {
   const [shapeCount, setShapeCount] = useState(0);
   const [showWire, setShowWire] = useState(true);
   const [showRoomPlan, setShowRoomPlan] = useState(true);
-  
+
   // Auto-edge detection
   const [autoDetect, setAutoDetect] = useState(false);
   const [edgeThreshold, setEdgeThreshold] = useState(45);
   const [detectedEdgeCount, setDetectedEdgeCount] = useState(0);
   const [detectedPolylineCount, setDetectedPolylineCount] = useState(0);
-  
+
   // Cut Room
   const [cutActive, setCutActive] = useState(false);
   const [cutType, setCutType] = useState<'horizontal' | 'vertical'>('horizontal');
@@ -191,7 +191,7 @@ export default function ARRulerScreen({ navigation }: any) {
         measurementsData.forEach(d => {
           const pType = d.payload?.type;
           const pts = d.payload?.points;
-          
+
           // Handle web primitives (cube, cylinder, sphere) — have position, not points
           if (['cube', 'cylinder', 'sphere'].includes(pType) && d.payload?.position) {
             allRemoteObjects.push({
@@ -211,7 +211,7 @@ export default function ARRulerScreen({ navigation }: any) {
           }
         });
       }
-      
+
       console.log(`[AR Collab] Sending ${allRemoteObjects.length} remote objects to native`);
       rulerRef.current?.loadRemoteObjects?.(allRemoteObjects);
 
@@ -242,10 +242,10 @@ export default function ARRulerScreen({ navigation }: any) {
           setWebOperatorOnline(isWebOnline)
         })
         .subscribe(async (status) => {
-           if (status === 'SUBSCRIBED') {
-              addLog(`🟢 AR Collab Sync Active (Web Data + Bounding Boxes)`);
-              await sub.track({ online_at: new Date().toISOString(), client: 'ios' })
-           }
+          if (status === 'SUBSCRIBED') {
+            addLog(`🟢 AR Collab Sync Active (Web Data + Bounding Boxes)`);
+            await sub.track({ online_at: new Date().toISOString(), client: 'ios' })
+          }
         });
 
       return () => {
@@ -262,7 +262,7 @@ export default function ARRulerScreen({ navigation }: any) {
       }
       const projectId = `proj_${Date.now()}_${Math.random().toString(36).substring(7)}`;
       const projectName = projectNameInput.trim();
-      
+
       if (userId) {
         const { error } = await supabase.from('ar_projects').insert({
           id: projectId,
@@ -284,7 +284,7 @@ export default function ARRulerScreen({ navigation }: any) {
         setProjectData({ id: p.id, name: p.name });
         setShowProjectModal(false);
         addLog(`📂 Loading project: ${p.name}`);
-        
+
         // Helper: load shapes after anchor is ready
         const loadShapesAfterAnchor = async () => {
           let loadedShapeCount = 0;
@@ -296,7 +296,7 @@ export default function ARRulerScreen({ navigation }: any) {
               .select('*')
               .eq('project_id', p.id)
               .order('created_at', { ascending: true });
-            
+
             if (measurements && measurements.length > 0) {
               const loadedCount = await rulerRef.current?.loadShapes(measurements);
               loadedShapeCount = measurements.length;
@@ -323,40 +323,40 @@ export default function ARRulerScreen({ navigation }: any) {
             }
           } catch (e: any) { addLog(`⚠️ Scene anchors: ${e.message}`); }
         };
-        
+
         // 1. Load anchor map
         setPrompt("Downloading AR Anchor...");
         const { data, error } = await supabase.storage.from('mesh-scans').download(`${userId}/${p.id}_anchor.map`);
         if (data) {
-           const fileUri = `${FileSystem.documentDirectory}temp_load_${Date.now()}.map`;
-           const reader = new FileReader();
-           reader.onload = async () => {
-             const base64 = (reader.result as string).split(',')[1];
-             await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
-             try {
-                await rulerRef.current?.loadWorldMap(fileUri);
-                addLog(`✅ Anchor map loaded`);
-                // Wait for ARKit to relocalize before placing shapes
-                setPrompt("⏳ Waiting for relocalization...");
-                await new Promise(r => setTimeout(r, 3000));
-                setPrompt("Anchor localized! Loading data...");
-             } catch (e) {
-                console.log("Load map error:", e);
-                addLog(`❌ Anchor load failed: ${e}`);
-             }
-             // Load shapes AFTER anchor relocalization
-             await loadShapesAfterAnchor();
-           };
-           reader.readAsDataURL(data);
+          const fileUri = `${FileSystem.documentDirectory}temp_load_${Date.now()}.map`;
+          const reader = new FileReader();
+          reader.onload = async () => {
+            const base64 = (reader.result as string).split(',')[1];
+            await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
+            try {
+              await rulerRef.current?.loadWorldMap(fileUri);
+              addLog(`✅ Anchor map loaded`);
+              // Wait for ARKit to relocalize before placing shapes
+              setPrompt("⏳ Waiting for relocalization...");
+              await new Promise(r => setTimeout(r, 3000));
+              setPrompt("Anchor localized! Loading data...");
+            } catch (e) {
+              console.log("Load map error:", e);
+              addLog(`❌ Anchor load failed: ${e}`);
+            }
+            // Load shapes AFTER anchor relocalization
+            await loadShapesAfterAnchor();
+          };
+          reader.readAsDataURL(data);
         } else {
-           setPrompt("No anchor map found. Loading data without anchor...");
-           addLog(`⚠️ No anchor map, loading shapes anyway`);
-           // No anchor — load shapes immediately  
-           await loadShapesAfterAnchor();
+          setPrompt("No anchor map found. Loading data without anchor...");
+          addLog(`⚠️ No anchor map, loading shapes anyway`);
+          // No anchor — load shapes immediately  
+          await loadShapesAfterAnchor();
         }
       }
     }
-    
+
     if (projectModalTab === 'new') {
       setShowProjectModal(false);
     }
@@ -412,7 +412,7 @@ export default function ARRulerScreen({ navigation }: any) {
           const records = JSON.parse(json);
           const lastRecord = records.pop(); // Remove last saved
           await AsyncStorage.setItem('@ar_measurements', JSON.stringify(records));
-          
+
           if (lastRecord?.id && userId) {
             await supabase.from('ar_measurements').delete().eq('id', lastRecord.id);
             if (lastRecord.status === 'uploaded') setUploadedCount(prev => Math.max(0, prev - 1));
@@ -563,7 +563,7 @@ export default function ARRulerScreen({ navigation }: any) {
         setPendingCount(records.filter((r: any) => r.status === 'pending').length);
         setUploadedCount(records.filter((r: any) => r.status === 'uploaded').length);
       }
-    } catch (e) {}
+    } catch (e) { }
   };
 
   const syncMeasurements = async () => {
@@ -618,29 +618,29 @@ export default function ARRulerScreen({ navigation }: any) {
     try {
       const cadData = await (rulerRef.current as any)?.exportCADData();
       if (!cadData) return;
-      
+
       if (cadData.bounding_boxes && cadData.bounding_boxes.length > 0) {
         const payload = cadData.bounding_boxes.map((box: any) => ({
-            id: box.identifier,
-            project_id: projectData.id,
-            user_id: userId,
-            class_name: box.class_name,
-            position_x: box.position.x,
-            position_y: box.position.y,
-            position_z: box.position.z,
-            width: box.dimensions.width,
-            height: box.dimensions.height,
-            depth: box.dimensions.depth,
-            payload: box.transform
+          id: box.identifier,
+          project_id: projectData.id,
+          user_id: userId,
+          class_name: box.class_name,
+          position_x: box.position.x,
+          position_y: box.position.y,
+          position_z: box.position.z,
+          width: box.dimensions.width,
+          height: box.dimensions.height,
+          depth: box.dimensions.depth,
+          payload: box.transform
         }));
         await supabase.from('ar_bounding_boxes').upsert(payload, { onConflict: 'id' });
       }
-      
+
       if (cadData.planes || cadData.trajectory) {
         const updatePayload: any = {};
         if (cadData.planes) updatePayload.ar_anchors_json = cadData.planes;
         if (cadData.trajectory) updatePayload.camera_trajectory = cadData.trajectory;
-        
+
         await supabase.from('ar_projects')
           .update(updatePayload)
           .eq('id', projectData.id);
@@ -662,26 +662,26 @@ export default function ARRulerScreen({ navigation }: any) {
 
       // 1. Export mesh chunks (only if MESH toggle is ON)
       if (meshExportEnabled) {
-      addLog(`📦 Exporting mesh chunks (max ${chunkSizeMB}MB each)...`);
-      const chunks = await rulerRef.current?.exportMeshChunks(chunkSizeMB);
-      if (chunks && chunks.length > 0 && !chunks[0].error) {
-        addLog(`✅ Got ${chunks.length} chunks`);
-        for (let i = 0; i < chunks.length; i++) {
-          const chunk = chunks[i];
-          const sizeMB = (chunk.byteSize / 1048576).toFixed(2);
-          addLog(`  📤 Chunk ${i+1}/${chunks.length}: ${chunk.vertexCount}v ${chunk.faceCount}f ${sizeMB}MB`);
-          const fileName = `${userId}/${projectData.id}_chunk_${i}.obj`;
-          const fileUri = `${FileSystem.documentDirectory}temp_mesh_${Date.now()}_${i}.obj`;
-          await FileSystem.writeAsStringAsync(fileUri, chunk.obj, { encoding: 'utf8' });
-          const formData = new FormData();
-          formData.append('file', { uri: fileUri, name: `chunk_${i}.obj`, type: 'model/obj' } as any);
-          await supabase.storage.from('mesh-scans').upload(fileName, formData, { upsert: true });
-          await FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => {});
-          addLog(`  ✅ Chunk ${i+1} uploaded`);
+        addLog(`📦 Exporting mesh chunks (max ${chunkSizeMB}MB each)...`);
+        const chunks = await rulerRef.current?.exportMeshChunks(chunkSizeMB);
+        if (chunks && chunks.length > 0 && !chunks[0].error) {
+          addLog(`✅ Got ${chunks.length} chunks`);
+          for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i];
+            const sizeMB = (chunk.byteSize / 1048576).toFixed(2);
+            addLog(`  📤 Chunk ${i + 1}/${chunks.length}: ${chunk.vertexCount}v ${chunk.faceCount}f ${sizeMB}MB`);
+            const fileName = `${userId}/${projectData.id}_chunk_${i}.obj`;
+            const fileUri = `${FileSystem.documentDirectory}temp_mesh_${Date.now()}_${i}.obj`;
+            await FileSystem.writeAsStringAsync(fileUri, chunk.obj, { encoding: 'utf8' });
+            const formData = new FormData();
+            formData.append('file', { uri: fileUri, name: `chunk_${i}.obj`, type: 'model/obj' } as any);
+            await supabase.storage.from('mesh-scans').upload(fileName, formData, { upsert: true });
+            await FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => { });
+            addLog(`  ✅ Chunk ${i + 1} uploaded`);
+          }
+        } else {
+          addLog(`⚠️ No mesh data: ${chunks?.[0]?.error || 'empty'}`);
         }
-      } else {
-        addLog(`⚠️ No mesh data: ${chunks?.[0]?.error || 'empty'}`);
-      }
       } else {
         addLog(`📦 Mesh export DISABLED — skipped`);
       }
@@ -696,7 +696,7 @@ export default function ARRulerScreen({ navigation }: any) {
         const formDataMap = new FormData();
         formDataMap.append('file', { uri: `file://${mapUrl}`, name: 'anchor.map', type: 'application/octet-stream' } as any);
         await supabase.storage.from('mesh-scans').upload(mapFileName, formDataMap, { upsert: true });
-        await FileSystem.deleteAsync(mapUrl, { idempotent: true }).catch(() => {});
+        await FileSystem.deleteAsync(mapUrl, { idempotent: true }).catch(() => { });
         addLog(`✅ Anchor map uploaded`);
       } else {
         addLog(`⚠️ No anchor map to save`);
@@ -712,7 +712,7 @@ export default function ARRulerScreen({ navigation }: any) {
 
   // --- Capture Detail (pause room scan → Object Capture → resume) ---
   const [isDetailCapturing, setIsDetailCapturing] = useState(false);
-  
+
   const handleCaptureDetail = async () => {
     if (!projectData || !userId) {
       Alert.alert('Project Required', 'Create a project first.');
@@ -720,14 +720,14 @@ export default function ARRulerScreen({ navigation }: any) {
     }
     try {
       addLogB('📷 Pausing room scan for detail capture...');
-      
+
       // 1. Get camera transform BEFORE pausing
       const transform = await rulerRef.current?.getCameraTransform();
-      
+
       // 2. Pause room scan (tracking continues)
       await rulerRef.current?.pauseRoomScan();
       setIsDetailCapturing(true);
-      
+
       // 3. Navigate to Object Capture with room context
       navigation.navigate('ObjectCapture', {
         projectId: projectData.id,
@@ -738,7 +738,7 @@ export default function ARRulerScreen({ navigation }: any) {
       addLogB(`❌ Detail capture error: ${e.message}`);
     }
   };
-  
+
   // Auto-resume room scan when returning from Object Capture
   useFocusEffect(
     useCallback(() => {
@@ -767,7 +767,7 @@ export default function ARRulerScreen({ navigation }: any) {
       // --- Check for previous manual anchors (2nd+ scan) ---
       const newSessionNum = scanSessionNumber + 1;
       setScanSessionNumber(newSessionNum);
-      
+
       if (projectData) {
         // Always check for previous manual anchors in DB (existing project or 2nd+ scan)
         const { data: prevAnchors } = await supabase
@@ -776,10 +776,10 @@ export default function ARRulerScreen({ navigation }: any) {
           .eq('project_id', projectData.id)
           .eq('type', 'manual')
           .order('created_at', { ascending: true });
-        
+
         if (prevAnchors && prevAnchors.length >= 3) {
           setPreviousAnchors(prevAnchors);
-          
+
           // Ask about matching
           const shouldMatch = await new Promise<boolean>((resolve) => {
             Alert.alert(
@@ -791,13 +791,13 @@ export default function ARRulerScreen({ navigation }: any) {
               ],
             );
           });
-          
+
           if (shouldMatch) {
             // Start matching mode
             await rulerRef.current?.startAnchorMatching(prevAnchors);
             setIsMatchingAnchors(true);
             setMatchCount(0);
-            
+
             // Sequential matching: one anchor at a time
             for (let i = 0; i < prevAnchors.length && i < 6; i++) {
               const anchor = prevAnchors[i];
@@ -811,14 +811,14 @@ export default function ARRulerScreen({ navigation }: any) {
                   ],
                 );
               });
-              
+
               if (matched) {
                 await rulerRef.current?.matchAnchor(i);
                 setMatchCount((prev: number) => prev + 1);
                 addLogB(`✅ Matched: ${anchor.name}`);
               }
             }
-            
+
             // Compute transform if 3+ matched
             const mCount = await rulerRef.current?.getMatchedCount();
             if (mCount >= 3) {
@@ -826,7 +826,7 @@ export default function ARRulerScreen({ navigation }: any) {
               if (transform) {
                 setSessionTransform(transform);
                 addLogB(`🎯 Kabsch transform computed! ${mCount} anchors matched`);
-                
+
                 // Save transform to project metadata
                 await supabase.from('ar_projects').update({
                   session_transform: transform,
@@ -839,7 +839,7 @@ export default function ARRulerScreen({ navigation }: any) {
           }
         }
       }
-      
+
       // Ask about auto-photo BEFORE starting scan
       await new Promise<void>((resolve) => {
         Alert.alert(
@@ -865,7 +865,7 @@ export default function ARRulerScreen({ navigation }: any) {
           ],
         );
       });
-      
+
       await rulerRef.current?.startRoomScan();
       setIsRoomScanning(true);
       setPrompt('🏠 Room scan active — move slowly around the room...');
@@ -881,7 +881,7 @@ export default function ARRulerScreen({ navigation }: any) {
       setIsRoomFinalizing(true);
       setPrompt('⏳ Exporting data before stopping scan...');
       addLogB('🛑 Preparing to stop room scan...');
-      
+
       // --- ANCHOR PLACEMENT FLOW (reactive UI — shows RED +ADD button) ---
       const placeAnchorsResult = await new Promise<boolean>((resolve) => {
         Alert.alert(
@@ -893,17 +893,17 @@ export default function ARRulerScreen({ navigation }: any) {
           ],
         );
       });
-      
+
       if (placeAnchorsResult) {
         setIsPlacingAnchors(true);
         setAnchorCount(0);
         setPrompt('📍 Zamiř křížkem a tapni + pro umístění kotvy');
-        
+
         // Wait for user to finish placing anchors (Hotovo button sets resolve)
         await new Promise<void>((resolve) => {
           anchorResolveRef.current = resolve;
         });
-        
+
         // Save manual anchors to DB
         const anchors = await rulerRef.current?.getManualAnchors();
         if (anchors && anchors.length > 0) {
@@ -923,55 +923,55 @@ export default function ARRulerScreen({ navigation }: any) {
         }
         setIsPlacingAnchors(false);
       }
-      
+
       // ===== EXPORT MESH + ANCHOR BEFORE STOP (stopRoomScan resets AR session!) =====
-      
+
       // 1. Export mesh FIRST (before session reset wipes reconstruction data)
       let meshSaved = false;
       if (meshExportEnabled) {
-      addLogB('📦 Exporting mesh BEFORE stop...');
-      setPrompt('⏳ Capturing mesh...');
-      try {
-        const chunks = await rulerRef.current?.exportMeshChunks(chunkSizeMB);
-        addLogB(`📦 exportMeshChunks returned: ${chunks?.length ?? 'null'} chunks`);
-        if (chunks && chunks.length > 0 && !chunks[0].error) {
-          let totalV = 0, totalF = 0, totalBytes = 0;
-          const encoder = new TextEncoder();
-          for (let i = 0; i < chunks.length; i++) {
-            const chunk = chunks[i];
-            totalV += chunk.vertexCount;
-            totalF += chunk.faceCount;
-            totalBytes += chunk.byteSize;
-            const fileName = `${userId}/${projectData!.id}_chunk_${i}.obj`;
-            const objBytes = encoder.encode(chunk.obj);
-            await supabase.storage.from('mesh-scans').upload(fileName, objBytes, {
-              contentType: 'text/plain',
-              upsert: true,
-            });
+        addLogB('📦 Exporting mesh BEFORE stop...');
+        setPrompt('⏳ Capturing mesh...');
+        try {
+          const chunks = await rulerRef.current?.exportMeshChunks(chunkSizeMB);
+          addLogB(`📦 exportMeshChunks returned: ${chunks?.length ?? 'null'} chunks`);
+          if (chunks && chunks.length > 0 && !chunks[0].error) {
+            let totalV = 0, totalF = 0, totalBytes = 0;
+            const encoder = new TextEncoder();
+            for (let i = 0; i < chunks.length; i++) {
+              const chunk = chunks[i];
+              totalV += chunk.vertexCount;
+              totalF += chunk.faceCount;
+              totalBytes += chunk.byteSize;
+              const fileName = `${userId}/${projectData!.id}_chunk_${i}.obj`;
+              const objBytes = encoder.encode(chunk.obj);
+              await supabase.storage.from('mesh-scans').upload(fileName, objBytes, {
+                contentType: 'text/plain',
+                upsert: true,
+              });
+            }
+            for (let i = 0; i < 20; i++) {
+              const liveFileName = `${userId}/${projectData!.id}_live_chunk_${i}.obj`;
+              await supabase.storage.from('mesh-scans').remove([liveFileName]).catch(() => { });
+            }
+            const { data: urlData } = supabase.storage.from('mesh-scans').getPublicUrl(`${userId}/${projectData!.id}_chunk_0.obj`);
+            await supabase.from('ar_projects').update({
+              mesh_url: urlData?.publicUrl || "",
+              mesh_vertices_count: totalV,
+              mesh_faces_count: totalF,
+              mesh_file_size: totalBytes,
+            }).eq('id', projectData!.id);
+            addLogB(`✅ Mesh saved: ${totalV}v ${totalF}f ${chunks.length} chunks`);
+            meshSaved = true;
+          } else {
+            addLogB(`⚠️ No mesh data: ${chunks?.[0]?.error || 'empty'}`);
           }
-          for (let i = 0; i < 20; i++) {
-            const liveFileName = `${userId}/${projectData!.id}_live_chunk_${i}.obj`;
-            await supabase.storage.from('mesh-scans').remove([liveFileName]).catch(() => {});
-          }
-          const { data: urlData } = supabase.storage.from('mesh-scans').getPublicUrl(`${userId}/${projectData!.id}_chunk_0.obj`);
-          await supabase.from('ar_projects').update({
-            mesh_url: urlData?.publicUrl || "",
-            mesh_vertices_count: totalV,
-            mesh_faces_count: totalF,
-            mesh_file_size: totalBytes,
-          }).eq('id', projectData!.id);
-          addLogB(`✅ Mesh saved: ${totalV}v ${totalF}f ${chunks.length} chunks`);
-          meshSaved = true;
-        } else {
-          addLogB(`⚠️ No mesh data: ${chunks?.[0]?.error || 'empty'}`);
+        } catch (meshErr: any) {
+          addLogB(`❌ Mesh export error: ${meshErr.message}`);
         }
-      } catch (meshErr: any) {
-        addLogB(`❌ Mesh export error: ${meshErr.message}`);
-      }
       } else {
         addLogB('📦 Mesh export DISABLED — skipped');
       }
-      
+
       // 2. Save anchor map BEFORE stop (world map is more complete before reset)
       try {
         addLogB('⚓ Saving anchor map...');
@@ -981,7 +981,7 @@ export default function ARRulerScreen({ navigation }: any) {
           const formDataMap = new FormData();
           formDataMap.append('file', { uri: `file://${mapUrl}`, name: 'anchor.map', type: 'application/octet-stream' } as any);
           await supabase.storage.from('mesh-scans').upload(mapFileName, formDataMap, { upsert: true });
-          await FileSystem.deleteAsync(mapUrl, { idempotent: true }).catch(() => {});
+          await FileSystem.deleteAsync(mapUrl, { idempotent: true }).catch(() => { });
           addLogB('✅ Anchor map saved');
         } else {
           addLogB('⚠️ No anchor map available');
@@ -989,17 +989,17 @@ export default function ARRulerScreen({ navigation }: any) {
       } catch (anchorErr: any) {
         addLogB(`⚠️ Anchor save: ${anchorErr.message}`);
       }
-      
+
       // ===== NOW STOP SCAN (this resets the AR session) =====
-      
+
       // 3. Stop RoomCaptureSession (triggers RoomBuilder finalization)
       addLogB('🛑 Stopping RoomCaptureSession...');
       await rulerRef.current?.stopRoomScan();
-      
+
       // 4. Wait for RoomBuilder ML finalization
       addLogB('🧠 RoomBuilder ML finalization in progress...');
       await new Promise(r => setTimeout(r, 4000));
-      
+
       // 5. Send FINALIZED RoomPlan data (session-specific — accumulates across scans)
       const scanSessionId = `session_${Date.now()}`;
       const roomData = await rulerRef.current?.exportRoomPlanData();
@@ -1025,7 +1025,7 @@ export default function ARRulerScreen({ navigation }: any) {
         }, { onConflict: 'id' });
         addLogB(`✅ RoomPlan [FINAL]: ${roomData.wallCount}W ${roomData.doorCount}D ${roomData.windowCount}Wi ${roomData.objectCount}O`);
       }
-      
+
       // 3b. Per-element upsert (UUID-based, persistent)
       const sessionId = `session_${Date.now()}`;
       try {
@@ -1049,7 +1049,7 @@ export default function ARRulerScreen({ navigation }: any) {
       } catch (elErr: any) {
         addLogB(`⚠️ Elements upsert: ${elErr.message}`);
       }
-      
+
       // 6. Upload auto-captured photos
       try {
         const autoPhotos = await rulerRef.current?.exportAutoPhotos();
@@ -1065,7 +1065,7 @@ export default function ARRulerScreen({ navigation }: any) {
               const byteArray = Uint8Array.from(atob(fileBase64), c => c.charCodeAt(0));
               const fileName = `auto_${Date.now()}_${uploaded}.jpg`;
               const storagePath = `${userId}/${projectData!.id}/${fileName}`;
-              
+
               const { data: uploadData, error: uploadErr } = await supabase.storage
                 .from('ar-photos')
                 .upload(storagePath, byteArray, {
@@ -1073,12 +1073,12 @@ export default function ARRulerScreen({ navigation }: any) {
                   cacheControl: '3600',
                   upsert: false,
                 });
-              
+
               if (!uploadErr && uploadData) {
                 const { data: { publicUrl } } = supabase.storage
                   .from('ar-photos')
                   .getPublicUrl(storagePath);
-                
+
                 await supabase.from('ar_photos').insert({
                   id: `auto_${Date.now()}_${uploaded}`,
                   project_id: projectData!.id,
@@ -1101,7 +1101,7 @@ export default function ARRulerScreen({ navigation }: any) {
       } catch (autoErr: any) {
         addLogB(`⚠️ Auto-photos: ${autoErr.message}`);
       }
-      
+
       setIsRoomFinalizing(false);
       setPrompt(`✅ Room scan complete! ${meshSaved ? 'Mesh + ' : ''}RoomPlan finalized.`);
     } catch (e: any) {
@@ -1139,14 +1139,14 @@ export default function ARRulerScreen({ navigation }: any) {
     if (!projectData || !userId) return;
     const interval = setInterval(async () => {
       if (isSyncing) return;
-      
+
       // 1. Measurements (always on)
       try {
         addLogM(`🔄 Auto-syncing...`);
         await syncMeasurements();
         addLogM(`✅ Synced`);
       } catch (e: any) { addLogM(`❌ ${e.message}`); }
-      
+
       // 2. RoomPlan structured data (during scan)
       if (isRoomScanning || isRoomFinalizing) {
         try {
@@ -1171,9 +1171,9 @@ export default function ARRulerScreen({ navigation }: any) {
               inferred_floor_y: roomData.inferredFloorY ?? null,
               updated_at: new Date().toISOString(),
             }, { onConflict: 'id' });
-          addLogB(`✅ RoomPlan: ${roomData.wallCount}W ${roomData.doorCount}D ${roomData.windowCount}Wi ${roomData.objectCount}O`);
+            addLogB(`✅ RoomPlan: ${roomData.wallCount}W ${roomData.doorCount}D ${roomData.windowCount}Wi ${roomData.objectCount}O`);
           }
-          
+
           // 2b. Per-element upsert (UUID-based merge — old elements stay, new ones added)
           const elements = await rulerRef.current?.exportRoomPlanElements();
           if (elements && elements.length > 0) {
@@ -1198,29 +1198,29 @@ export default function ARRulerScreen({ navigation }: any) {
 
         // 3. Mesh chunks streaming (during scan only — respects mesh toggle)
         if (meshExportEnabled) {
-        try {
-          const chunks = await rulerRef.current?.exportMeshChunks(chunkSizeMB);
-          if (chunks && chunks.length > 0 && !chunks[0].error) {
-            for (let i = 0; i < chunks.length; i++) {
-              const chunk = chunks[i];
-              const fileName = `${userId}/${projectData.id}_live_chunk_${i}.obj`;
-              const fileUri = `${FileSystem.documentDirectory}temp_mesh_live_${i}.obj`;
-              await FileSystem.writeAsStringAsync(fileUri, chunk.obj, { encoding: 'utf8' });
-              const formData = new FormData();
-              formData.append('file', { uri: fileUri, name: `chunk_${i}.obj`, type: 'model/obj' } as any);
-              await supabase.storage.from('mesh-scans').upload(fileName, formData, { upsert: true });
-              await FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => {});
+          try {
+            const chunks = await rulerRef.current?.exportMeshChunks(chunkSizeMB);
+            if (chunks && chunks.length > 0 && !chunks[0].error) {
+              for (let i = 0; i < chunks.length; i++) {
+                const chunk = chunks[i];
+                const fileName = `${userId}/${projectData.id}_live_chunk_${i}.obj`;
+                const fileUri = `${FileSystem.documentDirectory}temp_mesh_live_${i}.obj`;
+                await FileSystem.writeAsStringAsync(fileUri, chunk.obj, { encoding: 'utf8' });
+                const formData = new FormData();
+                formData.append('file', { uri: fileUri, name: `chunk_${i}.obj`, type: 'model/obj' } as any);
+                await supabase.storage.from('mesh-scans').upload(fileName, formData, { upsert: true });
+                await FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => { });
+              }
+              addLogB(`✅ Mesh: ${chunks.length} chunks streamed`);
             }
-            addLogB(`✅ Mesh: ${chunks.length} chunks streamed`);
+          } catch (meshErr: any) {
+            addLogB(`⚠️ Mesh stream: ${meshErr.message}`);
           }
-        } catch (meshErr: any) {
-          addLogB(`⚠️ Mesh stream: ${meshErr.message}`);
-        }
         } // end meshExportEnabled
       } else {
         addLogB(`✅ Idle (no scan)`);
       }
-      
+
       // 4. Camera trajectory + AR planes (always on — separate from removed bounding boxes)
       try {
         const cadData = await rulerRef.current?.exportCADData();
@@ -1232,7 +1232,7 @@ export default function ARRulerScreen({ navigation }: any) {
           addLogA(`📍 Trajectory synced`);
         }
       } catch (e: any) { addLogA(`⚠️ ${e.message}`); }
-      
+
       // 5. Anchor map save (non-blocking — critical for session resume)
       try {
         const mapUrl = await rulerRef.current?.saveWorldMap();
@@ -1241,11 +1241,11 @@ export default function ARRulerScreen({ navigation }: any) {
           const formDataMap = new FormData();
           formDataMap.append('file', { uri: `file://${mapUrl}`, name: 'anchor.map', type: 'application/octet-stream' } as any);
           await supabase.storage.from('mesh-scans').upload(mapFileName, formDataMap, { upsert: true });
-          await FileSystem.deleteAsync(mapUrl, { idempotent: true }).catch(() => {});
+          await FileSystem.deleteAsync(mapUrl, { idempotent: true }).catch(() => { });
           addLogA('⚓ Anchor saved');
         }
       } catch (anchorErr: any) { addLogA(`⚠️ Anchor: ${anchorErr.message}`); }
-      
+
       // 6. Scene anchors sync (upsert named anchors to DB)
       try {
         const sceneAnchors = await rulerRef.current?.exportSceneAnchors();
@@ -1268,7 +1268,7 @@ export default function ARRulerScreen({ navigation }: any) {
           addLogA(`📌 ${sceneAnchors.length} scene anchors synced`);
         }
       } catch (e: any) { addLogA(`⚠️ Anchors: ${e.message}`); }
-      
+
     }, 15000);
     return () => clearInterval(interval);
   }, [projectData, userId, isSyncing, isRoomScanning, isRoomFinalizing]);
@@ -1287,10 +1287,10 @@ export default function ARRulerScreen({ navigation }: any) {
         setPrompt("Mesh export failed.");
         return;
       }
-      
+
       let totalV = 0, totalF = 0, totalBytes = 0;
       for (let i = 0; i < chunks.length; i++) {
-        setPrompt(`Uploading chunk ${i+1}/${chunks.length}...`);
+        setPrompt(`Uploading chunk ${i + 1}/${chunks.length}...`);
         const chunk = chunks[i];
         totalV += chunk.vertexCount;
         totalF += chunk.faceCount;
@@ -1298,13 +1298,13 @@ export default function ARRulerScreen({ navigation }: any) {
         const fileName = `${userId}/${projectData.id}_chunk_${i}.obj`;
         const fileUri = `${FileSystem.documentDirectory}temp_mesh_${Date.now()}_${i}.obj`;
         await FileSystem.writeAsStringAsync(fileUri, chunk.obj, { encoding: 'utf8' });
-        
+
         const formData = new FormData();
         formData.append('file', { uri: fileUri, name: `chunk_${i}.obj`, type: 'model/obj' } as any);
         const { error } = await supabase.storage.from('mesh-scans').upload(fileName, formData, { upsert: true });
-        await FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => {});
+        await FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => { });
         if (error) throw error;
-        
+
         const scanId = `mesh_${Date.now()}_${Math.random().toString(36).substring(7)}`;
         await supabase.from('ar_mesh_scans').insert({
           id: scanId,
@@ -1317,9 +1317,9 @@ export default function ARRulerScreen({ navigation }: any) {
           format: 'obj',
         });
       }
-      
+
       // Bounding box sync removed
-      
+
       setPrompt(`Saving AR Anchor Map...`);
       const mapUrl = await rulerRef.current?.saveWorldMap();
       let mapFileName = "";
@@ -1328,9 +1328,9 @@ export default function ARRulerScreen({ navigation }: any) {
         const formDataMap = new FormData();
         formDataMap.append('file', { uri: `file://${mapUrl}`, name: 'anchor.map', type: 'application/octet-stream' } as any);
         await supabase.storage.from('mesh-scans').upload(mapFileName, formDataMap, { upsert: true });
-        await FileSystem.deleteAsync(mapUrl, { idempotent: true }).catch(() => {});
+        await FileSystem.deleteAsync(mapUrl, { idempotent: true }).catch(() => { });
       }
-      
+
       const { data: urlData } = supabase.storage.from('mesh-scans').getPublicUrl(`${userId}/${projectData.id}_chunk_0.obj`);
       await supabase.from('ar_projects').update({
         mesh_url: urlData?.publicUrl || "",
@@ -1420,15 +1420,15 @@ export default function ARRulerScreen({ navigation }: any) {
       if (!result || !result.uri || !result.transform) {
         throw new Error("No photo captured");
       }
-      
+
       const fileName = `${userId}/${projectData.id}_${Date.now()}.jpg`;
-      
+
       // Read photo as base64 and upload as binary (FormData doesn't work reliably on RN)
       const photoBase64 = await FileSystem.readAsStringAsync(result.uri.replace('file://', ''), {
         encoding: FileSystem.EncodingType.Base64,
       });
       const byteArray = Uint8Array.from(atob(photoBase64), c => c.charCodeAt(0));
-      
+
       const { error: uploadErr } = await supabase.storage
         .from('ar-photos')
         .upload(fileName, byteArray, {
@@ -1436,9 +1436,9 @@ export default function ARRulerScreen({ navigation }: any) {
           upsert: false,
         });
       if (uploadErr) throw uploadErr;
-      
+
       const { data: publicUrlData } = supabase.storage.from('ar-photos').getPublicUrl(fileName);
-      
+
       const photoId = `photo_${Date.now()}`;
       await supabase.from('ar_photos').insert({
         id: photoId,
@@ -1448,7 +1448,7 @@ export default function ARRulerScreen({ navigation }: any) {
         public_url: publicUrlData.publicUrl,
         transform: result.transform
       });
-      
+
       setPrompt("📷 Photo saved to map!");
     } catch (e: any) {
       console.log("Photo error:", e);
@@ -1459,9 +1459,9 @@ export default function ARRulerScreen({ navigation }: any) {
 
   return (
     <View style={styles.container}>
-      <ARRulerNativeView 
+      <ARRulerNativeView
         ref={rulerRef}
-        style={styles.arContainer} 
+        style={styles.arContainer}
         onUpdate={handleUpdate}
         onPlaneStateChange={handlePlaneState}
         drawingMode={drawingMode}
@@ -1469,13 +1469,13 @@ export default function ARRulerScreen({ navigation }: any) {
         showWire={showWire}
         showRoomPlan={showRoomPlan}
       />
-      
+
       {/* Header */}
       <View style={[styles.headerOverlay, { paddingTop: insets.top + spacing.sm }]}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Text style={styles.backIcon}>←</Text>
         </TouchableOpacity>
-        
+
         <View style={{ flex: 1, paddingLeft: 8 }}>
           <Text style={styles.headerTitle} numberOfLines={1}>
             {projectData ? projectData.name : 'AR Ruler'}
@@ -1492,7 +1492,7 @@ export default function ARRulerScreen({ navigation }: any) {
         {/* Top Right Controls — LOGOUT + DELETE ALL */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           {userId && (
-            <TouchableOpacity 
+            <TouchableOpacity
               style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' }}
               onPress={async () => { await supabase.auth.signOut(); setUserId(null); setProjectData(null); }}
             >
@@ -1501,12 +1501,12 @@ export default function ARRulerScreen({ navigation }: any) {
           )}
 
           {shapeCount > 0 && (
-            <TouchableOpacity 
+            <TouchableOpacity
               style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#FF1744', borderWidth: 2, borderColor: '#FF1744', alignItems: 'center', justifyContent: 'center' }}
               onPress={handleReset}
               activeOpacity={0.7}
             >
-               <Text style={{ color: '#FFF', fontSize: 20, fontWeight: 'bold', lineHeight: 22, marginTop: -2 }}>✕</Text>
+              <Text style={{ color: '#FFF', fontSize: 20, fontWeight: 'bold', lineHeight: 22, marginTop: -2 }}>✕</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -1524,75 +1524,75 @@ export default function ARRulerScreen({ navigation }: any) {
           <Text style={{ color: '#0f0', fontSize: 9, fontFamily: 'monospace' }}>{showDebugPanel ? '▼ HIDE' : '▶ SYNC'}</Text>
         </TouchableOpacity>
       </View>
-      
+
 
 
       {/* Tool buttons — right side: DELETE ALL + WIRE + ROOM + SCAN */}
       <View style={{ position: 'absolute', right: 12, bottom: insets.bottom + 20, zIndex: 15, gap: 6, alignItems: 'center' }} pointerEvents="box-none">
-         
-         <TouchableOpacity 
-           style={[styles.circleBtn, { borderColor: '#E0E0E0', backgroundColor: '#E0E0E0' }]}
-           onPress={handleTakePhoto}
-           activeOpacity={0.7}
-         >
-            <Text style={[styles.circleBtnText, { color: '#000', fontSize: 24, marginTop: -4 }]}>📷</Text>
-         </TouchableOpacity>
 
-         <TouchableOpacity 
-           style={[styles.circleBtn, showWire && { borderColor: tronBlue, backgroundColor: tronBlue }]}
-           onPress={() => setShowWire(!showWire)}
-           activeOpacity={0.7}
-         >
-            <Text style={[styles.circleBtnText, showWire && { color: '#000' }]}>WIRE</Text>
-         </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.circleBtn, { borderColor: '#E0E0E0', backgroundColor: '#E0E0E0' }]}
+          onPress={handleTakePhoto}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.circleBtnText, { color: '#000', fontSize: 24, marginTop: -4 }]}>📷</Text>
+        </TouchableOpacity>
 
-         <TouchableOpacity 
-           style={[styles.circleBtn, meshExportEnabled && { borderColor: '#FF9800', backgroundColor: '#FF9800' }]}
-           onPress={() => setMeshExportEnabled(!meshExportEnabled)}
-           activeOpacity={0.7}
-         >
-            <Text style={[styles.circleBtnText, meshExportEnabled && { color: '#000' }]}>MESH</Text>
-         </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.circleBtn, showWire && { borderColor: tronBlue, backgroundColor: tronBlue }]}
+          onPress={() => setShowWire(!showWire)}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.circleBtnText, showWire && { color: '#000' }]}>WIRE</Text>
+        </TouchableOpacity>
 
-         <TouchableOpacity 
-           style={[styles.circleBtn, showRoomPlan && { borderColor: '#AB47BC', backgroundColor: '#AB47BC' }]}
-           onPress={() => setShowRoomPlan(!showRoomPlan)}
-           activeOpacity={0.7}
-         >
-            <Text style={[styles.circleBtnText, showRoomPlan && { color: '#FFF' }]}>ROOM</Text>
-         </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.circleBtn, meshExportEnabled && { borderColor: '#FF9800', backgroundColor: '#FF9800' }]}
+          onPress={() => setMeshExportEnabled(!meshExportEnabled)}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.circleBtnText, meshExportEnabled && { color: '#000' }]}>MESH</Text>
+        </TouchableOpacity>
 
-         <TouchableOpacity 
-           style={[styles.circleBtn, 
-             isRoomScanning ? { borderColor: '#FF1744', backgroundColor: '#FF1744' } :
-             isRoomFinalizing ? { borderColor: '#FFD600', backgroundColor: '#FFD600' } :
-             { borderColor: '#4CAF50', backgroundColor: '#222' }
-           ]}
-           onPress={isRoomScanning ? handleStopRoomScan : handleStartRoomScan}
-           disabled={isRoomFinalizing}
-           activeOpacity={0.7}
-         >
-            {isRoomFinalizing ? (
-              <>
-                <ActivityIndicator size="small" color="#000" />
-              </>
-            ) : isRoomScanning ? (
-              <Text style={[styles.circleBtnText, { color: '#FFF' }]}>STOP</Text>
-            ) : (
-              <Text style={[styles.circleBtnText, { color: '#4CAF50' }]}>SCAN</Text>
-            )}
-         </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.circleBtn, showRoomPlan && { borderColor: '#AB47BC', backgroundColor: '#AB47BC' }]}
+          onPress={() => setShowRoomPlan(!showRoomPlan)}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.circleBtnText, showRoomPlan && { color: '#FFF' }]}>ROOM</Text>
+        </TouchableOpacity>
 
-          {/* Capture Detail button — only visible during scanning */}
-          {isRoomScanning && (
-            <TouchableOpacity
-              style={[styles.circleBtn, { borderColor: '#E040FB', backgroundColor: '#222', width: 52, height: 52 }]}
-              onPress={handleCaptureDetail}
-              activeOpacity={0.7}
-            >
-              <Text style={[styles.circleBtnText, { color: '#E040FB', fontSize: 8 }]}>📷{"\n"}DETAIL</Text>
-            </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.circleBtn,
+          isRoomScanning ? { borderColor: '#FF1744', backgroundColor: '#FF1744' } :
+            isRoomFinalizing ? { borderColor: '#FFD600', backgroundColor: '#FFD600' } :
+              { borderColor: '#4CAF50', backgroundColor: '#222' }
+          ]}
+          onPress={isRoomScanning ? handleStopRoomScan : handleStartRoomScan}
+          disabled={isRoomFinalizing}
+          activeOpacity={0.7}
+        >
+          {isRoomFinalizing ? (
+            <>
+              <ActivityIndicator size="small" color="#000" />
+            </>
+          ) : isRoomScanning ? (
+            <Text style={[styles.circleBtnText, { color: '#FFF' }]}>STOP</Text>
+          ) : (
+            <Text style={[styles.circleBtnText, { color: '#4CAF50' }]}>SCAN</Text>
           )}
+        </TouchableOpacity>
+
+        {/* Capture Detail button — only visible during scanning */}
+        {isRoomScanning && (
+          <TouchableOpacity
+            style={[styles.circleBtn, { borderColor: '#E040FB', backgroundColor: '#222', width: 52, height: 52 }]}
+            onPress={handleCaptureDetail}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.circleBtnText, { color: '#E040FB', fontSize: 8 }]}>📷{"\n"}DETAIL</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Cut Room controls — only when CUT=ON */}
@@ -1604,13 +1604,13 @@ export default function ARRulerScreen({ navigation }: any) {
           </View>
           {/* H / V toggle */}
           <View style={{ flexDirection: 'row', gap: 6, marginBottom: 6 }}>
-            <TouchableOpacity 
+            <TouchableOpacity
               onPress={async () => { setCutType('horizontal'); await rulerRef.current?.setCutActive(true, 'horizontal'); }}
               style={{ flex: 1, padding: 6, borderRadius: 6, alignItems: 'center', backgroundColor: cutType === 'horizontal' ? 'rgba(255,77,0,0.3)' : 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: cutType === 'horizontal' ? '#FF4D00' : 'rgba(255,255,255,0.1)' }}
             >
               <Text style={{ color: cutType === 'horizontal' ? '#FF4D00' : '#888', fontSize: 10, fontWeight: 'bold' }}>HORIZONTAL</Text>
             </TouchableOpacity>
-            <TouchableOpacity 
+            <TouchableOpacity
               onPress={async () => { setCutType('vertical'); await rulerRef.current?.setCutActive(true, 'vertical'); }}
               style={{ flex: 1, padding: 6, borderRadius: 6, alignItems: 'center', backgroundColor: cutType === 'vertical' ? 'rgba(255,77,0,0.3)' : 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: cutType === 'vertical' ? '#FF4D00' : 'rgba(255,255,255,0.1)' }}
             >
@@ -1642,7 +1642,7 @@ export default function ARRulerScreen({ navigation }: any) {
             </View>
           )}
           {/* Save cut */}
-          <TouchableOpacity 
+          <TouchableOpacity
             onPress={async () => {
               try {
                 const result = await rulerRef.current?.getCutResult();
@@ -1675,87 +1675,87 @@ export default function ARRulerScreen({ navigation }: any) {
 
       {/* Mode button — left side, cyclic button + context buttons above */}
       <View style={{ position: 'absolute', left: 12, bottom: insets.bottom + 20, zIndex: 15, gap: 6, alignItems: 'center' }} pointerEvents="box-none">
-         {/* CLOSE / SAVE OPEN — shown when enough points, same circle size */}
-         {pointCount >= 3 && (
-           <>
-             <TouchableOpacity 
-               style={[styles.circleBtn, { borderColor: tronBlue, backgroundColor: tronBlue }]}
-               onPress={handleCloseShape}
-               activeOpacity={0.7}
-             >
-               <Text style={[styles.circleBtnText, { color: '#000', fontSize: 9 }]}>CLOSE</Text>
-             </TouchableOpacity>
-             <TouchableOpacity 
-               style={[styles.circleBtn, { borderColor: '#FFD700', backgroundColor: '#FFD700' }]}
-               onPress={handleSaveOpenShape}
-               activeOpacity={0.7}
-             >
-               <Text style={[styles.circleBtnText, { color: '#000', fontSize: 8 }]}>SAVE{"\n"}OPEN</Text>
-             </TouchableOpacity>
-           </>
-         )}
-         {pointCount === 2 && (
-           <TouchableOpacity 
-             style={[styles.circleBtn, { borderColor: '#FFD700', backgroundColor: '#FFD700' }]}
-             onPress={handleSaveOpenShape}
-             activeOpacity={0.7}
-           >
-             <Text style={[styles.circleBtnText, { color: '#000', fontSize: 8 }]}>SAVE{"\n"}LINE</Text>
-           </TouchableOpacity>
-         )}
+        {/* CLOSE / SAVE OPEN — shown when enough points, same circle size */}
+        {pointCount >= 3 && (
+          <>
+            <TouchableOpacity
+              style={[styles.circleBtn, { borderColor: tronBlue, backgroundColor: tronBlue }]}
+              onPress={handleCloseShape}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.circleBtnText, { color: '#000', fontSize: 9 }]}>CLOSE</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.circleBtn, { borderColor: '#FFD700', backgroundColor: '#FFD700' }]}
+              onPress={handleSaveOpenShape}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.circleBtnText, { color: '#000', fontSize: 8 }]}>SAVE{"\n"}OPEN</Text>
+            </TouchableOpacity>
+          </>
+        )}
+        {pointCount === 2 && (
+          <TouchableOpacity
+            style={[styles.circleBtn, { borderColor: '#FFD700', backgroundColor: '#FFD700' }]}
+            onPress={handleSaveOpenShape}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.circleBtnText, { color: '#000', fontSize: 8 }]}>SAVE{"\n"}LINE</Text>
+          </TouchableOpacity>
+        )}
 
-         {/* Cyclic mode button — FLOOR → WALL → FREE, fully colored */}
-         <TouchableOpacity 
-           style={[styles.circleBtn, {
-             borderColor: drawingMode === 'free' ? freeOrange : drawingMode === 'wall' ? wallPink : tronBlue,
-             backgroundColor: drawingMode === 'free' ? freeOrange : drawingMode === 'wall' ? wallPink : tronBlue,
-           }]}
-           onPress={() => {
-             const modes: Array<'floor' | 'wall' | 'free'> = ['floor', 'wall', 'free'];
-             const idx = modes.indexOf(drawingMode);
-             const next = modes[(idx + 1) % modes.length];
-             setDrawingMode(next);
-           }}
-           activeOpacity={0.7}
-         >
-            <Text style={[styles.circleBtnText, { color: '#000', fontWeight: 'bold' }]}>
-              {drawingMode.toUpperCase()}
-            </Text>
-         </TouchableOpacity>
+        {/* Cyclic mode button — FLOOR → WALL → FREE, fully colored */}
+        <TouchableOpacity
+          style={[styles.circleBtn, {
+            borderColor: drawingMode === 'free' ? freeOrange : drawingMode === 'wall' ? wallPink : tronBlue,
+            backgroundColor: drawingMode === 'free' ? freeOrange : drawingMode === 'wall' ? wallPink : tronBlue,
+          }]}
+          onPress={() => {
+            const modes: Array<'floor' | 'wall' | 'free'> = ['floor', 'wall', 'free'];
+            const idx = modes.indexOf(drawingMode);
+            const next = modes[(idx + 1) % modes.length];
+            setDrawingMode(next);
+          }}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.circleBtnText, { color: '#000', fontWeight: 'bold' }]}>
+            {drawingMode.toUpperCase()}
+          </Text>
+        </TouchableOpacity>
       </View>
 
       {/* + Add point — center bottom */}
       <View style={{ position: 'absolute', bottom: insets.bottom + 20, left: 0, right: 0, alignItems: 'center', zIndex: 15 }} pointerEvents="box-none">
-         {/* Hint text above buttons */}
-         <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 10, marginBottom: 6, fontWeight: '500' }}>
-           {pointCount === 0 ? (floorDetected || drawingMode !== 'floor' ? 'Tap + to add first corner' : 'Scanning floor...') :
+        {/* Hint text above buttons */}
+        <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 10, marginBottom: 6, fontWeight: '500' }}>
+          {pointCount === 0 ? (floorDetected || drawingMode !== 'floor' ? 'Tap + to add first corner' : 'Scanning floor...') :
             pointCount < 3 ? `${pointCount} pts — tap more corners` :
-            `${pointCount} pts — CLOSE or SAVE OPEN`}
-         </Text>
+              `${pointCount} pts — CLOSE or SAVE OPEN`}
+        </Text>
 
-         {/* UNDO circle above + button — only when drawing (pointCount > 0) */}
-         {pointCount > 0 && (
-           <TouchableOpacity 
-             style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#333', borderWidth: 2, borderColor: '#555', alignItems: 'center', justifyContent: 'center', marginBottom: 8 }}
-             onPress={handleUndo}
-             activeOpacity={0.7}
-           >
-             <Text style={{ color: '#FFF', fontSize: 20 }}>↩</Text>
-           </TouchableOpacity>
-         )}
+        {/* UNDO circle above + button — only when drawing (pointCount > 0) */}
+        {pointCount > 0 && (
+          <TouchableOpacity
+            style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#333', borderWidth: 2, borderColor: '#555', alignItems: 'center', justifyContent: 'center', marginBottom: 8 }}
+            onPress={handleUndo}
+            activeOpacity={0.7}
+          >
+            <Text style={{ color: '#FFF', fontSize: 20 }}>↩</Text>
+          </TouchableOpacity>
+        )}
 
-         {/* + button — same 56px circle */}
-         <TouchableOpacity 
-           style={[styles.circleBtn, { 
-             width: 64, height: 64, borderRadius: 32,
-             borderColor: drawingMode === 'free' ? freeOrange : drawingMode === 'wall' ? wallPink : tronBlue,
-             backgroundColor: drawingMode === 'free' ? freeOrange : drawingMode === 'wall' ? wallPink : tronBlue,
-           }]} 
-           onPress={handleAddPoint} 
-           activeOpacity={0.7}
-         >
-            <Text style={{ color: '#000', fontSize: 36, lineHeight: 40, fontWeight: '300', marginTop: -2 }}>+</Text>
-         </TouchableOpacity>
+        {/* + button — same 56px circle */}
+        <TouchableOpacity
+          style={[styles.circleBtn, {
+            width: 64, height: 64, borderRadius: 32,
+            borderColor: drawingMode === 'free' ? freeOrange : drawingMode === 'wall' ? wallPink : tronBlue,
+            backgroundColor: drawingMode === 'free' ? freeOrange : drawingMode === 'wall' ? wallPink : tronBlue,
+          }]}
+          onPress={handleAddPoint}
+          activeOpacity={0.7}
+        >
+          <Text style={{ color: '#000', fontSize: 36, lineHeight: 40, fontWeight: '300', marginTop: -2 }}>+</Text>
+        </TouchableOpacity>
       </View>
 
       {/* ===== ANCHOR PLACEMENT OVERLAY — RED +ADD button when isPlacingAnchors ===== */}
@@ -1830,7 +1830,7 @@ export default function ARRulerScreen({ navigation }: any) {
 
       {showDebugPanel && (
         <ScrollView style={{ position: 'absolute', left: 12, right: 12, top: insets.top + 90, maxHeight: 380, backgroundColor: 'rgba(0,0,0,0.85)', borderRadius: 10, padding: 8, zIndex: 99, borderWidth: 1, borderColor: 'rgba(0,255,100,0.2)' }}>
-          
+
           {/* 1. MEASUREMENTS */}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 3 }}>
             <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#33CCFF' }} />
@@ -1881,9 +1881,9 @@ export default function ARRulerScreen({ navigation }: any) {
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>🔐 Sign In</Text>
             <Text style={styles.modalSubtitle}>Sign in to save projects & sync to cloud</Text>
-            
+
             {loginError && <Text style={styles.loginError}>{loginError}</Text>}
-            
+
             <TextInput
               style={styles.modalInput}
               placeholder="Email"
@@ -1908,7 +1908,7 @@ export default function ARRulerScreen({ navigation }: any) {
                 <Text style={styles.modalBtnSkipText}>Skip</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.modalBtnCreate, { backgroundColor: tronBlue }]} onPress={handleQuickLogin} disabled={loginLoading}>
-                {loginLoading 
+                {loginLoading
                   ? <ActivityIndicator color="#000" size="small" />
                   : <Text style={[styles.modalBtnCreateText, { color: '#000' }]}>Sign In</Text>
                 }
@@ -1962,8 +1962,8 @@ export default function ARRulerScreen({ navigation }: any) {
                     <FlatList
                       data={userProjects}
                       keyExtractor={item => item.id}
-                      renderItem={({item}) => (
-                        <TouchableOpacity 
+                      renderItem={({ item }) => (
+                        <TouchableOpacity
                           style={[styles.projectListItem, selectedLoadProjectId === item.id && styles.projectListItemSelected]}
                           onPress={() => setSelectedLoadProjectId(item.id)}
                         >
@@ -1994,7 +1994,7 @@ export default function ARRulerScreen({ navigation }: any) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
   arContainer: { flex: 1 },
-  
+
   debugWindow: { position: 'absolute', left: 12, backgroundColor: 'rgba(0,0,0,0.75)', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#333', zIndex: 999 },
   debugTitle: { color: '#0f0', fontSize: 11, fontWeight: 'bold', marginBottom: 2 },
   debugText: { color: '#AAA', fontSize: 10, marginBottom: 4 },
@@ -2007,13 +2007,13 @@ const styles = StyleSheet.create({
   headerTitle: { flex: 1, fontFamily: typography.fontFamily.semiBold, fontSize: typography.fontSize.md, color: '#FFF' },
   actionButton: { paddingHorizontal: spacing.sm, paddingVertical: 10, borderRadius: borderRadius.sm, backgroundColor: 'rgba(0,0,0,0.6)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)' },
   actionButtonText: { color: '#FFF', fontFamily: typography.fontFamily.bold, fontSize: 12, letterSpacing: 1 },
-  
+
   modeSelectorContainer: { position: 'absolute', left: spacing.md, right: spacing.md, zIndex: 11 },
   segmentedControl: { height: 36, borderRadius: 18 },
 
   promptOverlay: { position: 'absolute', top: 70, left: spacing.md, right: spacing.md, alignItems: 'center', zIndex: 12, pointerEvents: 'none' },
   promptText: { backgroundColor: 'rgba(0,0,0,0.8)', paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, borderRadius: 30, fontFamily: typography.fontFamily.semiBold, fontSize: 13, ...shadows.md, overflow: 'hidden' },
-  
+
   bottomPanel: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(5,10,20,0.92)', borderTopWidth: 1, borderTopColor: 'rgba(51,204,255,0.2)', flexDirection: 'row', justifyContent: 'space-evenly', paddingTop: spacing.lg, zIndex: 10 },
   measureBox: { alignItems: 'center', justifyContent: 'center', flex: 1 },
   measureValue: { color: '#FFF', fontSize: 28, fontFamily: typography.fontFamily.bold },
@@ -2059,7 +2059,7 @@ const styles = StyleSheet.create({
   projectListContainer: { width: '100%' },
   projectListItem: { padding: 12, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 8, marginBottom: 8, borderWidth: 1, borderColor: 'transparent' },
   projectListItemSelected: { backgroundColor: '#33CCFF', borderColor: '#FFF' },
-  
+
   toggleContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.3)', padding: 12, borderRadius: 8, marginBottom: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
   toggleTitle: { color: '#FFF', fontSize: 13, fontFamily: typography.fontFamily.semiBold, marginBottom: 2 },
   toggleDesc: { color: 'rgba(255,255,255,0.5)', fontSize: 10, fontFamily: typography.fontFamily.regular },

@@ -432,6 +432,7 @@ export default function ARSketchScreen({ navigation }: any) {
         case 'line': {
           if (newStep >= 2) {
             await rulerRef.current?.saveOpenShape();
+            await rulerRef.current?.clearCurrentShape?.(); // ← BREAK native polyline chain!
             const shape = { type: 'line', points: newPoints };
             setShapes(prev => [...prev, shape]);
             saveShapeToDb(shape);

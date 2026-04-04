@@ -1,4 +1,5 @@
 // AR Sketch v2 — Clean drawing flow with 2D/3D tool pickers
+const BUILD_TAG = 'BUILD-2025-0404-A'; // VISIBLE VERSION TAG
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Alert, Modal,
@@ -990,6 +991,8 @@ export default function ARSketchScreen({ navigation }: any) {
 
   return (
     <View style={[S.container, { paddingTop: insets.top }]}>
+      {/* VERSION TAG — remove after debug */}
+      <Text style={{ position: 'absolute', top: insets.top + 4, left: 8, color: '#FF0000', fontSize: 11, fontWeight: '900', zIndex: 9999 }}>{BUILD_TAG}</Text>
       {/* ═══ PERSISTENT AR VIEW — never unmounts ═══ */}
       <ARRulerNativeView ref={rulerRef} style={{ flex: 1 }}
         showMesh={isSketchPhase ? showMesh : false}

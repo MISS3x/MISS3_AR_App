@@ -406,10 +406,9 @@ export default function ARSketchScreen({ navigation }: any) {
     if (!activeTool || activeTool === 'select') return;
 
     try {
-      // For line/polyline: addPoint() adds native polyline point + returns position
-      // For computed shapes (rect, circle, box...): getCursorPosition() just gets coords
-      // Fallback: if getCursorPosition doesn't exist (old build), use addPoint()
-      const needsNativePoint = activeTool === 'line' || activeTool === 'polyline';
+      // Only POLYLINE uses native addPoint() (orange polyline).
+      // Everything else (LINE, RECT, BOX, etc.) uses getCursorPosition() + wireframe preview.
+      const needsNativePoint = activeTool === 'polyline';
       
       let point: DrawPoint;
       if (needsNativePoint) {
@@ -417,7 +416,6 @@ export default function ARSketchScreen({ navigation }: any) {
         if (!result) return;
         point = { x: result.x || 0, y: result.y || 0, z: result.z || 0 };
       } else {
-        // Use getCursorPosition — no side effects, just gets coords
         const pos = await rulerRef.current?.getCursorPosition?.();
         if (!pos) return;
         point = { x: pos.x || 0, y: pos.y || 0, z: pos.z || 0 };
@@ -428,15 +426,15 @@ export default function ARSketchScreen({ navigation }: any) {
 
       switch (activeTool) {
 
-        // ═══ LINE: 2 taps (unchained) ═══
+        // ═══ LINE: 2 taps (unchained), white wireframe preview ═══
         case 'line': {
           if (newStep >= 2) {
-            await rulerRef.current?.saveOpenShape();
-            await rulerRef.current?.clearCurrentShape?.(); // ← BREAK native polyline chain!
+            // Build a 2-point line via native bridge (same as RECT)
+            await buildPolygonShape(newPoints, `Line_${shapes.length}`);
             const shape = { type: 'line', points: newPoints };
             setShapes(prev => [...prev, shape]);
             saveShapeToDb(shape);
-            resetDrawing(); // Vrací step na 0 a vyčistí body, ale activeTool zůstává 'line'!
+            resetDrawing(); // step=0, points=[], activeTool stays 'line'
             return;
           }
           break;

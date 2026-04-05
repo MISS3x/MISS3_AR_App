@@ -594,21 +594,29 @@ export default function ARSketchScreen({ navigation }: any) {
           }
           if (newStep >= 4) {
             // Use 3D rect generation for base (same as RECT)
-            const corners = generateRectPoints(newPoints[0], newPoints[1], newPoints[2]);
+            let corners = generateRectPoints(newPoints[0], newPoints[1], newPoints[2]);
             
-            // Height = distance from 4th point to base plane along plane normal
+            // ═══ ENSURE CCW WINDING (normals UP = +Y) ═══
+            // Cross product of edge01 × edge03 should point up (positive Y)
+            const e01x = corners[1].x - corners[0].x;
+            const e01y = corners[1].y - corners[0].y;
+            const e01z = corners[1].z - corners[0].z;
+            const e03x = corners[3].x - corners[0].x;
+            const e03y = corners[3].y - corners[0].y;
+            const e03z = corners[3].z - corners[0].z;
+            // Cross product Y component: e01z * e03x - e01x * e03z
+            const crossY = e01z * e03x - e01x * e03z;
+            if (crossY < 0) {
+              // CW order → reverse to CCW so normal points up
+              corners = [corners[0], corners[3], corners[2], corners[1]];
+            }
+            
+            // Height = always positive (extrude UP from base)
             const d = newPoints[3];
             const a = newPoints[0];
-            // Use the plane normal if available, else compute from rect corners
-            let heightVec = { x: 0, y: 1, z: 0 }; // default up
-            if (plane) {
-              heightVec = { x: plane.nx, y: plane.ny, z: plane.nz };
-            }
-            const height = Math.abs(
-              (d.x - a.x) * heightVec.x + (d.y - a.y) * heightVec.y + (d.z - a.z) * heightVec.z
-            ) || 0.5;
+            const height = Math.abs(d.y - a.y) || 0.5;
 
-            // Use extrudeSketchShape — respects exact rotation & position
+            // Use extrudeSketchShape — CCW corners + positive height = up with outward normals
             await rulerRef.current?.extrudeSketchShape?.(
               corners.map(p => ({ x: p.x, y: p.y, z: p.z })),
               height,

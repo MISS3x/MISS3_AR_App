@@ -554,7 +554,7 @@ export default function ARSketchScreen({ navigation }: any) {
             return;
           }
           if (newStep >= 4) {
-            // Compute base rect from 3-point system (same as rect)
+            // Compute base rect corners from 3-point system (same as rect)
             const a = newPoints[0], b = newPoints[1], c = newPoints[2];
             const abx = b.x - a.x, abz = b.z - a.z;
             const abLen = Math.sqrt(abx * abx + abz * abz) || 0.001;
@@ -562,25 +562,21 @@ export default function ARSketchScreen({ navigation }: any) {
             const acx = c.x - a.x, acz = c.z - a.z;
             const w = acx * perpx + acz * perpz;
             const corners = [
-              a, b,
+              { x: a.x, y: a.y, z: a.z },
+              { x: b.x, y: b.y, z: b.z },
               { x: b.x + perpx * w, y: a.y, z: b.z + perpz * w },
               { x: a.x + perpx * w, y: a.y, z: a.z + perpz * w },
             ];
             const height = Math.abs(newPoints[3].y - a.y) || 0.5;
-            const cx = (corners[0].x + corners[2].x) / 2;
-            const cy = a.y + height / 2;
-            const cz = (corners[0].z + corners[2].z) / 2;
 
-            await rulerRef.current?.addPrimitiveAt?.(
-              'cube',
-              { x: cx, y: cy, z: cz },
-              { width: abLen, height, depth: Math.abs(w) },
+            // Use extrudeSketchShape — respects exact rotation & position
+            await rulerRef.current?.extrudeSketchShape?.(
+              corners.map(p => ({ x: p.x, y: p.y, z: p.z })),
+              height,
               `Box_${shapes.length}`
             );
             const shape = {
               type: 'box', points: corners,
-              position: { x: cx, y: cy, z: cz },
-              scale: { x: abLen, y: height, z: Math.abs(w) },
               height,
             };
             setShapes(prev => [...prev, shape]);

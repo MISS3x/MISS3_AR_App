@@ -425,10 +425,11 @@ export default function ARSketchScreen({ navigation }: any) {
         // ═══ LINE: 2 taps (unchained), white wireframe preview ═══
         case 'line': {
           if (newStep >= 2) {
-            // Add 2 points and save as OPEN shape (no clearCurrentShape — keeps previous lines!)
+            // Add 2 points and save as OPEN shape
             await rulerRef.current?.addPointAt?.(newPoints[0].x, newPoints[0].y, newPoints[0].z);
             await rulerRef.current?.addPointAt?.(newPoints[1].x, newPoints[1].y, newPoints[1].z);
-            await rulerRef.current?.saveOpenShape(); // persists line in AR view
+            await rulerRef.current?.saveOpenShape(); // saves + migrates nodes to permanent
+            await rulerRef.current?.clearCurrentShape?.(); // clear buffer for next line
             const shape = { type: 'line', points: newPoints };
             setShapes(prev => [...prev, shape]);
             saveShapeToDb(shape);

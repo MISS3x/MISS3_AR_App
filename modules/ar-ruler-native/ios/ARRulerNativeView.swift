@@ -1367,6 +1367,21 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
     closedShapes.append(shapeData)
     currentPolygon.removeAll()
     
+    // ═══ MIGRATE visual nodes to permanent container ═══
+    // Move lineNodes, pointNodes, labels into a saved container
+    // so clearCurrentShape() won't delete them
+    let savedContainer = SCNNode()
+    savedContainer.name = "savedShape_\(shapeNumber)"
+    for node in lineNodes { savedContainer.addChildNode(node) }
+    for node in pointNodes { savedContainer.addChildNode(node) }
+    for lbl in labels { savedContainer.addChildNode(lbl) }
+    arView.scene.rootNode.addChildNode(savedContainer)
+    
+    // Clear working arrays (nodes are now owned by savedContainer)
+    lineNodes.removeAll()
+    pointNodes.removeAll()
+    labels.removeAll()
+    
     return shapeData
   }
 

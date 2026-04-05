@@ -708,19 +708,48 @@ export default function ARSketchScreen({ navigation }: any) {
     }
   };
 
-  const handleUndo = async () => {
-    try {
-      await rulerRef.current?.undoLastPoint();
-      setDrawState(prev => ({
-        ...prev,
-        step: Math.max(0, prev.step - 1),
-        points: prev.points.slice(0, -1),
-      }));
-    } catch {}
+  // ═══ GLOBAL BACK: step back in drawing OR delete last shape ═══
+  const handleBack = async () => {
+    if (drawState.step > 0) {
+      // Currently drawing — remove last placed point
+      try {
+        await rulerRef.current?.undoLastPoint();
+      } catch {}
+      const newPoints = drawState.points.slice(0, -1);
+      const newStep = Math.max(0, drawState.step - 1);
+      setDrawState(prev => ({ ...prev, step: newStep, points: newPoints }));
+      // Update preview with remaining points
+      if (newPoints.length > 0 && activeTool) {
+        updatePreview(activeTool, newPoints);
+      } else {
+        try { await rulerRef.current?.clearShapePreview?.(); } catch {}
+      }
+    } else if (shapes.length > 0) {
+      // Not drawing — delete last created shape
+      const lastShape = shapes[shapes.length - 1];
+      setShapes(prev => prev.slice(0, -1));
+      // Delete from DB if it has an id
+      if (lastShape?.id) {
+        try {
+          await supabase.from('ar_measurements').delete().eq('id', lastShape.id);
+        } catch {}
+      }
+      // Remove last saved visual node from AR scene
+      try {
+        // The savedContainer nodes are named savedShape_N
+        // We just need to remove the most recent native saved shape
+        // For sketch shapes, use deleteSketchShape if available
+        if (lastShape?.sketchId) {
+          await rulerRef.current?.deleteSketchShape?.(lastShape.sketchId);
+        }
+      } catch {}
+    }
   };
 
+  // ═══ CANCEL: abort current drawing, keep existing shapes ═══
   const handleCancel = async () => {
     try { await rulerRef.current?.clearCurrentShape?.(); } catch {}
+    try { await rulerRef.current?.clearShapePreview?.(); } catch {}
     resetDrawing();
   };
 
@@ -1393,11 +1422,9 @@ export default function ARSketchScreen({ navigation }: any) {
 
               {/* Context actions */}
               <View style={{ flexDirection: 'row', gap: 6 }}>
-                {isDrawing && (
-                  <TouchableOpacity style={S.smallBtn} onPress={handleUndo}>
-                    <Text style={S.smallBtnText}>↩</Text>
-                  </TouchableOpacity>
-                )}
+                <TouchableOpacity style={S.smallBtn} onPress={handleBack}>
+                  <Text style={S.smallBtnText}>↩ BACK</Text>
+                </TouchableOpacity>
                 {isPolyline && (
                   <TouchableOpacity style={[S.smallBtn, { borderColor: '#FF9800' }]} onPress={handleClose}>
                     <Text style={[S.smallBtnText, { color: '#FF9800' }]}>⬡ CLOSE</Text>

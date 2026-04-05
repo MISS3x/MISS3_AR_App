@@ -3722,6 +3722,24 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
     session.run(configuration, options: [.resetTracking])
   }
 
+  func sessionWasInterrupted(_ session: ARSession) {
+    // Camera covered or app backgrounded — pause rendering to prevent freeze
+    print("[ARKit] Session interrupted (camera covered?)")
+    onPlaneStateChange(["status": "interrupted"])
+  }
+
+  func sessionInterruptionEnded(_ session: ARSession) {
+    // Camera uncovered — resume tracking
+    print("[ARKit] Session interruption ended, resuming")
+    let configuration = ARWorldTrackingConfiguration()
+    configuration.planeDetection = [.horizontal, .vertical]
+    if #available(iOS 13.4, *), ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) {
+      configuration.sceneReconstruction = .mesh
+    }
+    // Don't reset tracking — try to relocalize so we keep existing anchors
+    session.run(configuration)
+    onPlaneStateChange(["status": "searching"])
+  }
   // MARK: - Sketch 3D CSG Methods
 
   func addPrimitive(type: String, size: Float, label: String) -> [String: Any]? {

@@ -295,10 +295,6 @@ export default function ARSketchScreen({ navigation }: any) {
       rulerRef.current?.clearShapePreview?.();
       return;
     }
-    // Cancel any in-progress drawing first
-    if (drawState.step > 0) {
-      rulerRef.current?.clearCurrentShape?.().catch(() => {});
-    }
     try {
       const pts = currentPoints.map((p: DrawPoint) => ({ x: p.x, y: p.y, z: p.z }));
       rulerRef.current?.setPreviewShape?.(t, pts);
@@ -429,11 +425,10 @@ export default function ARSketchScreen({ navigation }: any) {
         // ═══ LINE: 2 taps (unchained), white wireframe preview ═══
         case 'line': {
           if (newStep >= 2) {
-            // Build persistent 2-point line: clear old, add 2 points, save as OPEN shape
-            await rulerRef.current?.clearCurrentShape?.();
+            // Add 2 points and save as OPEN shape (no clearCurrentShape — keeps previous lines!)
             await rulerRef.current?.addPointAt?.(newPoints[0].x, newPoints[0].y, newPoints[0].z);
             await rulerRef.current?.addPointAt?.(newPoints[1].x, newPoints[1].y, newPoints[1].z);
-            await rulerRef.current?.saveOpenShape(); // keeps line visible in AR!
+            await rulerRef.current?.saveOpenShape(); // persists line in AR view
             const shape = { type: 'line', points: newPoints };
             setShapes(prev => [...prev, shape]);
             saveShapeToDb(shape);

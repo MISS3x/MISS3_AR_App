@@ -429,8 +429,11 @@ export default function ARSketchScreen({ navigation }: any) {
         // ═══ LINE: 2 taps (unchained), white wireframe preview ═══
         case 'line': {
           if (newStep >= 2) {
-            // Build a 2-point line via native bridge (same as RECT)
-            await buildPolygonShape(newPoints, `Line_${shapes.length}`);
+            // Build persistent 2-point line: clear old, add 2 points, save as OPEN shape
+            await rulerRef.current?.clearCurrentShape?.();
+            await rulerRef.current?.addPointAt?.(newPoints[0].x, newPoints[0].y, newPoints[0].z);
+            await rulerRef.current?.addPointAt?.(newPoints[1].x, newPoints[1].y, newPoints[1].z);
+            await rulerRef.current?.saveOpenShape(); // keeps line visible in AR!
             const shape = { type: 'line', points: newPoints };
             setShapes(prev => [...prev, shape]);
             saveShapeToDb(shape);

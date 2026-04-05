@@ -472,6 +472,7 @@ export default function ARSketchScreen({ navigation }: any) {
           if (newStep === 2) {
             // Edge AB defined, wait for width
             setDrawState({ step: newStep, points: newPoints, toolType: activeTool });
+            updatePreview(activeTool, newPoints); // show 4-sided rect preview!
             return;
           }
           if (newStep >= 3) {
@@ -553,6 +554,7 @@ export default function ARSketchScreen({ navigation }: any) {
           if (newStep === 2 || newStep === 3) {
             // Step 2: edge defined, wait for width. Step 3: base complete, wait for height
             setDrawState({ step: newStep, points: newPoints, toolType: activeTool });
+            updatePreview(activeTool, newPoints); // show rect/box preview!
             return;
           }
           if (newStep >= 4) {

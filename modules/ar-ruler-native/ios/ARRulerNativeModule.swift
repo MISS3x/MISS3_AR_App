@@ -53,6 +53,10 @@ public class ARRulerNativeModule: Module {
         return view.getCursorPosition()
       }
 
+      AsyncFunction("getCursorPositionOnPlane") { (view: ARRulerNativeView, nx: Float, ny: Float, nz: Float, px: Float, py: Float, pz: Float) -> [String: Float]? in
+        return view.getCursorPositionOnPlane(nx: nx, ny: ny, nz: nz, px: px, py: py, pz: pz)
+      }
+
       AsyncFunction("clearCurrentShape") { (view: ARRulerNativeView) in
         view.clearCurrentShape()
       }

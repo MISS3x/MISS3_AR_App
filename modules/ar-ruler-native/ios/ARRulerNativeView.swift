@@ -91,6 +91,9 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   var sceneAnchors: [[String: Any]] = []  // Named anchors for multi-session alignment
   var sceneAnchorNodes: [SCNNode] = []     // Visual markers for anchors
   
+  // Last surface normal (updated per-frame for getCursorPosition)
+  private var lastSurfaceNormal: SCNVector3 = SCNVector3(0, 1, 0)
+  
   // Ghost preview line (from last point to cursor)
   private var ghostLineNode: SCNNode?
   private var ghostDistLabel: SCNNode?
@@ -452,6 +455,7 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
     
     // Align pointer to surface normal
     alignPointerToNormal(surfaceNormal)
+    lastSurfaceNormal = surfaceNormal  // store for getCursorPosition
     
     // Update ghost preview line from last polygon point to cursor
     updateGhostLine(to: position)
@@ -654,11 +658,35 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
     addPolygonPoint(at: pos, color: color)
   }
 
-  /// Get current cursor position without adding a point
+  /// Get current cursor position + surface normal without adding a point
   func getCursorPosition() -> [String: Float]? {
     guard let pointer = pointerNode, !pointer.isHidden else { return nil }
     let pos = pointer.position
-    return ["x": pos.x, "y": pos.y, "z": pos.z]
+    return ["x": pos.x, "y": pos.y, "z": pos.z,
+            "nx": lastSurfaceNormal.x, "ny": lastSurfaceNormal.y, "nz": lastSurfaceNormal.z]
+  }
+  
+  /// Get cursor position projected onto a specific plane (defined by normal + point on plane)
+  func getCursorPositionOnPlane(nx: Float, ny: Float, nz: Float, px: Float, py: Float, pz: Float) -> [String: Float]? {
+    // Camera ray
+    guard let cam = arView.pointOfView else { return nil }
+    let camPos = cam.worldPosition
+    let camDir = cam.worldFront
+    
+    // Plane: dot(normal, P - planePoint) = 0
+    let nLen = sqrt(nx*nx + ny*ny + nz*nz)
+    guard nLen > 0.001 else { return nil }
+    let nnx = nx/nLen, nny = ny/nLen, nnz = nz/nLen
+    
+    let denom = nnx * camDir.x + nny * camDir.y + nnz * camDir.z
+    guard abs(denom) > 0.001 else { return nil } // ray parallel to plane
+    
+    let t = (nnx * (px - camPos.x) + nny * (py - camPos.y) + nnz * (pz - camPos.z)) / denom
+    guard t > 0 && t < 30.0 else { return nil }
+    
+    return ["x": camPos.x + t * camDir.x,
+            "y": camPos.y + t * camDir.y,
+            "z": camPos.z + t * camDir.z]
   }
 
   /// Clear the current in-progress shape (discard all current polygon points)
@@ -1331,6 +1359,17 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
     
     closedShapes.append(shapeData)
     currentPolygon.removeAll()
+    
+    // ═══ MIGRATE visual nodes to permanent container ═══
+    let savedContainer = SCNNode()
+    savedContainer.name = "savedShape_\(shapeNumber)"
+    for node in lineNodes { savedContainer.addChildNode(node) }
+    for node in pointNodes { savedContainer.addChildNode(node) }
+    for lbl in labels { savedContainer.addChildNode(lbl) }
+    arView.scene.rootNode.addChildNode(savedContainer)
+    lineNodes.removeAll()
+    pointNodes.removeAll()
+    labels.removeAll()
     
     return shapeData
   }

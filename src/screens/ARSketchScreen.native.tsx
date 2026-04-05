@@ -33,10 +33,12 @@ type TransformMode = 'move' | 'rotate' | 'scale';
 
 // Drawing step state
 interface DrawPoint { x: number; y: number; z: number; }
+interface DrawPlane { nx: number; ny: number; nz: number; px: number; py: number; pz: number; }
 interface DrawingState {
   step: number;
   points: DrawPoint[];
   toolType: ActiveTool;
+  plane?: DrawPlane; // surface plane from first tap (constrains subsequent points)
 }
 
 const TOOLS_2D: { id: Tool2D; icon: string; label: string; steps: string[] }[] = [
@@ -346,22 +348,33 @@ export default function ARSketchScreen({ navigation }: any) {
 
   // Generate rectangle from 3 points: A=corner1, B=corner2 (top edge), C=sets width perpendicular
   const generateRectPoints = (a: DrawPoint, b: DrawPoint, c: DrawPoint): DrawPoint[] => {
-    // AB = top edge direction
-    const abx = b.x - a.x;
-    const abz = b.z - a.z;
-    const abLen = Math.sqrt(abx * abx + abz * abz) || 0.001;
-    // Perpendicular direction (rotated 90°)
-    const perpx = -abz / abLen;
-    const perpz = abx / abLen;
-    // Project C onto perpendicular to get width
-    const acx = c.x - a.x;
-    const acz = c.z - a.z;
-    const width = acx * perpx + acz * perpz;
+    // Edge AB as 3D vector
+    const abx = b.x - a.x, aby = b.y - a.y, abz = b.z - a.z;
+    const abLen = Math.sqrt(abx * abx + aby * aby + abz * abz) || 0.001;
+    
+    // AC vector
+    const acx = c.x - a.x, acy = c.y - a.y, acz = c.z - a.z;
+    
+    // Plane normal = AB × AC (cross product)
+    const nx = aby * acz - abz * acy;
+    const ny = abz * acx - abx * acz;
+    const nz = abx * acy - aby * acx;
+    
+    // Perpendicular direction within the plane: N × AB
+    let px = ny * abz - nz * aby;
+    let py = nz * abx - nx * abz;
+    let pz = nx * aby - ny * abx;
+    const pLen = Math.sqrt(px * px + py * py + pz * pz) || 0.001;
+    px /= pLen; py /= pLen; pz /= pLen;
+    
+    // Width = projection of AC onto perpendicular
+    const width = acx * px + acy * py + acz * pz;
+    
     return [
       { x: a.x, y: a.y, z: a.z },
-      { x: b.x, y: a.y, z: b.z },
-      { x: b.x + perpx * width, y: a.y, z: b.z + perpz * width },
-      { x: a.x + perpx * width, y: a.y, z: a.z + perpz * width },
+      { x: b.x, y: b.y, z: b.z },
+      { x: b.x + px * width, y: b.y + py * width, z: b.z + pz * width },
+      { x: a.x + px * width, y: a.y + py * width, z: a.z + pz * width },
     ];
   };
 
@@ -389,8 +402,10 @@ export default function ARSketchScreen({ navigation }: any) {
         await rulerRef.current?.addPointAt?.(p.x, p.y, p.z);
       }
       await rulerRef.current?.closeShape();
+      // Clear buffer after save (nodes are now in permanent container)
+      await rulerRef.current?.clearCurrentShape?.();
+      await rulerRef.current?.clearShapePreview?.();
     } catch (e: any) {
-      // Fallback: just add each point normally if addPointAt isn't available
       console.warn('[Sketch] buildPolygonShape fallback:', e.message);
     }
   };
@@ -403,22 +418,46 @@ export default function ARSketchScreen({ navigation }: any) {
 
     try {
       // Only POLYLINE uses native addPoint() (orange polyline).
-      // Everything else (LINE, RECT, BOX, etc.) uses getCursorPosition() + wireframe preview.
+      // Everything else uses getCursorPosition() + wireframe preview.
       const needsNativePoint = activeTool === 'polyline';
       
+      // Multi-step tools that need plane constraint after first tap
+      const multiStepTools = ['rect', 'square', 'circle', 'ellipse', 'box', 'cylinder', 'cone', 'pyramid'];
+      const isMultiStep = multiStepTools.includes(activeTool);
+      
       let point: DrawPoint;
+      let surfaceNormal: { nx: number; ny: number; nz: number } | undefined;
+      
       if (needsNativePoint) {
         const result = await rulerRef.current?.addPoint();
         if (!result) return;
         point = { x: result.x || 0, y: result.y || 0, z: result.z || 0 };
+      } else if (isMultiStep && drawState.step > 0 && drawState.plane) {
+        // Constrain to the plane defined by the first tap
+        const pl = drawState.plane;
+        const pos = await rulerRef.current?.getCursorPositionOnPlane?.(
+          pl.nx, pl.ny, pl.nz, pl.px, pl.py, pl.pz
+        );
+        if (!pos) return;
+        point = { x: pos.x || 0, y: pos.y || 0, z: pos.z || 0 };
       } else {
+        // First tap or unconstrained tool — get position + surface normal
         const pos = await rulerRef.current?.getCursorPosition?.();
         if (!pos) return;
         point = { x: pos.x || 0, y: pos.y || 0, z: pos.z || 0 };
+        if (pos.nx !== undefined) {
+          surfaceNormal = { nx: pos.nx, ny: pos.ny, nz: pos.nz };
+        }
       }
       
       const newPoints = [...drawState.points, point];
       const newStep = drawState.step + 1;
+      
+      // Store plane from first tap for multi-step tools
+      let plane = drawState.plane;
+      if (isMultiStep && newStep === 1 && surfaceNormal) {
+        plane = { ...surfaceNormal, px: point.x, py: point.y, pz: point.z };
+      }
 
       switch (activeTool) {
 
@@ -467,7 +506,7 @@ export default function ARSketchScreen({ navigation }: any) {
         case 'rect': {
           if (newStep === 2) {
             // Edge AB defined, wait for width
-            setDrawState({ step: newStep, points: newPoints, toolType: activeTool });
+            setDrawState({ step: newStep, points: newPoints, toolType: activeTool, plane });
             updatePreview(activeTool, newPoints); // show 4-sided rect preview!
             return;
           }
@@ -549,25 +588,25 @@ export default function ARSketchScreen({ navigation }: any) {
         case 'box': {
           if (newStep === 2 || newStep === 3) {
             // Step 2: edge defined, wait for width. Step 3: base complete, wait for height
-            setDrawState({ step: newStep, points: newPoints, toolType: activeTool });
+            setDrawState({ step: newStep, points: newPoints, toolType: activeTool, plane });
             updatePreview(activeTool, newPoints); // show rect/box preview!
             return;
           }
           if (newStep >= 4) {
-            // Compute base rect corners from 3-point system (same as rect)
-            const a = newPoints[0], b = newPoints[1], c = newPoints[2];
-            const abx = b.x - a.x, abz = b.z - a.z;
-            const abLen = Math.sqrt(abx * abx + abz * abz) || 0.001;
-            const perpx = -abz / abLen, perpz = abx / abLen;
-            const acx = c.x - a.x, acz = c.z - a.z;
-            const w = acx * perpx + acz * perpz;
-            const corners = [
-              { x: a.x, y: a.y, z: a.z },
-              { x: b.x, y: b.y, z: b.z },
-              { x: b.x + perpx * w, y: a.y, z: b.z + perpz * w },
-              { x: a.x + perpx * w, y: a.y, z: a.z + perpz * w },
-            ];
-            const height = Math.abs(newPoints[3].y - a.y) || 0.5;
+            // Use 3D rect generation for base (same as RECT)
+            const corners = generateRectPoints(newPoints[0], newPoints[1], newPoints[2]);
+            
+            // Height = distance from 4th point to base plane along plane normal
+            const d = newPoints[3];
+            const a = newPoints[0];
+            // Use the plane normal if available, else compute from rect corners
+            let heightVec = { x: 0, y: 1, z: 0 }; // default up
+            if (plane) {
+              heightVec = { x: plane.nx, y: plane.ny, z: plane.nz };
+            }
+            const height = Math.abs(
+              (d.x - a.x) * heightVec.x + (d.y - a.y) * heightVec.y + (d.z - a.z) * heightVec.z
+            ) || 0.5;
 
             // Use extrudeSketchShape — respects exact rotation & position
             await rulerRef.current?.extrudeSketchShape?.(
@@ -615,7 +654,7 @@ export default function ARSketchScreen({ navigation }: any) {
         case 'cylinder': {
           if (newStep === 2) {
             // Radius defined, wait for height
-            setDrawState({ step: newStep, points: newPoints, toolType: activeTool });
+            setDrawState({ step: newStep, points: newPoints, toolType: activeTool, plane });
             return;
           }
           if (newStep >= 3) {
@@ -644,7 +683,7 @@ export default function ARSketchScreen({ navigation }: any) {
         // ═══ CONE: 3 taps (center + radius + height) ═══
         case 'cone': {
           if (newStep === 2) {
-            setDrawState({ step: newStep, points: newPoints, toolType: activeTool });
+            setDrawState({ step: newStep, points: newPoints, toolType: activeTool, plane });
             return;
           }
           if (newStep >= 3) {
@@ -673,7 +712,7 @@ export default function ARSketchScreen({ navigation }: any) {
         // ═══ PYRAMID: 3 taps (2 base corners + height) ═══
         case 'pyramid': {
           if (newStep === 2) {
-            setDrawState({ step: newStep, points: newPoints, toolType: activeTool });
+            setDrawState({ step: newStep, points: newPoints, toolType: activeTool, plane });
             return;
           }
           if (newStep >= 3) {
@@ -700,7 +739,7 @@ export default function ARSketchScreen({ navigation }: any) {
         }
       }
 
-      setDrawState({ step: newStep, points: newPoints, toolType: activeTool });
+      setDrawState({ step: newStep, points: newPoints, toolType: activeTool, plane });
       // Set real-time wireframe preview for shape tools
       updatePreview(activeTool, newPoints);
     } catch (e: any) {

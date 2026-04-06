@@ -1264,22 +1264,44 @@ export default function ARRulerScreen({ navigation }: any) {
         // 3. Mesh chunks streaming (during scan only — respects mesh toggle)
         if (meshExportEnabled) {
           try {
-            const chunks = await rulerRef.current?.exportMeshChunks(chunkSizeMB);
-            if (chunks && chunks.length > 0 && !chunks[0].error) {
-              for (let i = 0; i < chunks.length; i++) {
-                const chunk = chunks[i];
-                const fileName = `${userId}/${projectData.id}_live_chunk_${i}.obj`;
-                const fileUri = `${FileSystem.documentDirectory}temp_mesh_live_${i}.obj`;
-                await FileSystem.writeAsStringAsync(fileUri, chunk.obj, { encoding: 'utf8' });
-                const formData = new FormData();
-                formData.append('file', { uri: fileUri, name: `chunk_${i}.obj`, type: 'model/obj' } as any);
-                await supabase.storage.from('mesh-scans').upload(fileName, formData, { upsert: true });
-                await FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => { });
+            // Check if mesh size warrants a stream
+            const stats = await rulerRef.current?.getMemoryStats?.();
+            const meshMB = stats?.meshSizeMB || 0;
+            addLogMesh(`📊 Mesh: ${meshMB.toFixed(1)}MB, ${stats?.meshAnchorCount || 0} anchors, ${stats?.uploadedAnchorCount || 0} uploaded`);
+            
+            if (meshMB > 5) { // only stream if more than 5MB of new mesh
+              addLogMesh(`⬆️ Streaming mesh (${meshMB.toFixed(1)}MB)...`);
+              setIsUploadingMesh(true);
+              const chunks = await rulerRef.current?.exportMeshChunks(chunkSizeMB);
+              if (chunks && chunks.length > 0 && !chunks[0].error) {
+                setMeshChunksTotal(chunks.length);
+                setMeshChunksUploaded(0);
+                const encoder = new TextEncoder();
+                let totalBytes = 0;
+                for (let i = 0; i < chunks.length; i++) {
+                  const chunk = chunks[i];
+                  const fileName = `${userId}/${projectData.id}_live_chunk_${i}.obj`;
+                  const objBytes = encoder.encode(chunk.obj);
+                  totalBytes += objBytes.length;
+                  addLogMesh(`⬆️ Chunk ${i+1}/${chunks.length}: ${chunk.vertexCount}v ${(objBytes.length/1024/1024).toFixed(1)}MB`);
+                  await supabase.storage.from('mesh-scans').upload(fileName, objBytes, {
+                    contentType: 'text/plain',
+                    upsert: true,
+                  });
+                  setMeshChunksUploaded(i + 1);
+                }
+                addLogMesh(`✅ ${chunks.length} chunks streamed (${(totalBytes/1024/1024).toFixed(1)}MB)`);
+                
+                // Mark anchors as uploaded & clear SceneKit nodes to free RAM
+                await rulerRef.current?.markAnchorsUploaded?.();
+                const cleared = await rulerRef.current?.clearUploadedMeshNodes?.() || 0;
+                addLogMesh(`🧹 Cleared ${cleared} mesh nodes from GPU RAM`);
               }
-              addLogB(`✅ Mesh: ${chunks.length} chunks streamed`);
+              setIsUploadingMesh(false);
             }
           } catch (meshErr: any) {
             addLogB(`⚠️ Mesh stream: ${meshErr.message}`);
+            setIsUploadingMesh(false);
           }
         } // end meshExportEnabled
       } else {
@@ -1616,7 +1638,7 @@ export default function ARRulerScreen({ navigation }: any) {
             <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 7, fontWeight: 'bold', letterSpacing: 0.5 }}>
               {memoryStats.meshPaused ? '⏸ MESH PAUSED' 
                 : memoryStats.availableMemoryMB < 400 ? '⚡ HIGH LOAD' 
-                : `● ${memoryStats.meshAnchorCount} anchors`}
+                : `● ${memoryStats.meshAnchorCount} anchors${(memoryStats as any).uploadedAnchorCount > 0 ? ` (${(memoryStats as any).uploadedAnchorCount}⬆)` : ''}`}
             </Text>
           </View>
         </View>

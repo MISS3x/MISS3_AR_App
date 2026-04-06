@@ -23,6 +23,7 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   private var totalMeshAnchorCount: Int = 0
   private var lastMeshUpdateTimes: [UUID: TimeInterval] = [:]  // throttle per-anchor
   private let meshUpdateThrottle: TimeInterval = 1.0   // max 1 update/sec per anchor
+  private var uploadedAnchorIDs: Set<UUID> = []  // anchors already streamed to cloud
 
   // State
   enum DrawingMode: String {
@@ -287,6 +288,10 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   func renderer(_ renderer: SCNSceneRenderer, didUpdate node: SCNNode, for anchor: ARAnchor) {
       if #available(iOS 13.4, *) {
           if let meshAnchor = anchor as? ARMeshAnchor {
+              // Skip if mesh paused OR anchor already uploaded
+              if meshReconstructionPaused { return }
+              if uploadedAnchorIDs.contains(meshAnchor.identifier) { return }
+              
               // ═══ THROTTLE: max 1 geometry update per second per anchor ═══
               let now = CACurrentMediaTime()
               if let lastUpdate = lastMeshUpdateTimes[meshAnchor.identifier],
@@ -410,12 +415,10 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
     meshReconstructionPaused = true
     
     print("[Memory] ⚠️ Pausing mesh reconstruction — reason: \(reason)")
+    print("[Memory] NOT re-running session — mesh anchors preserved")
     
-    // Re-run session WITHOUT mesh reconstruction
-    let config = ARWorldTrackingConfiguration()
-    config.planeDetection = [.horizontal, .vertical]
-    // NO sceneReconstruction = .mesh → stops adding new mesh anchors
-    session.run(config)
+    // DO NOT re-run session — that destroys mesh anchors!
+    // Just set flag; renderer delegate will skip geometry updates
     
     onUpdate([
       "event": "mesh_auto_paused",
@@ -430,15 +433,42 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   func resumeMeshReconstruction(session: ARSession) {
     print("[Memory] ✅ Resuming mesh reconstruction")
     meshReconstructionPaused = false
-    
-    let config = ARWorldTrackingConfiguration()
-    config.planeDetection = [.horizontal, .vertical]
-    if #available(iOS 13.4, *), ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) {
-      config.sceneReconstruction = .mesh
-    }
-    session.run(config)
-    
+    // Mesh reconstruction continues automatically since session still has .mesh config
+    // No need to re-run session
     onUpdate(["event": "mesh_resumed"])
+  }
+  
+  /// Mark mesh anchor IDs as uploaded (skip future geometry updates for these)
+  func markAnchorsAsUploaded() {
+    guard let frame = arView.session.currentFrame else { return }
+    let meshAnchors = frame.anchors.compactMap { $0 as? ARMeshAnchor }
+    for anchor in meshAnchors {
+      uploadedAnchorIDs.insert(anchor.identifier)
+    }
+    print("[Memory] Marked \(meshAnchors.count) anchors as uploaded (total: \(uploadedAnchorIDs.count))")
+  }
+  
+  /// Remove SceneKit nodes for uploaded mesh anchors to free GPU memory
+  func clearUploadedMeshNodes() -> Int {
+    var cleared = 0
+    guard let frame = arView.session.currentFrame else { return 0 }
+    
+    for anchor in frame.anchors {
+      guard let meshAnchor = anchor as? ARMeshAnchor else { continue }
+      if uploadedAnchorIDs.contains(meshAnchor.identifier) {
+        if let node = arView.node(for: meshAnchor) {
+          // Remove all child geometry nodes (occluder + wireframe)
+          for child in node.childNodes {
+            child.geometry = nil
+            child.removeFromParentNode()
+          }
+          cleared += 1
+        }
+      }
+    }
+    
+    print("[Memory] Cleared \(cleared) uploaded mesh nodes from SceneKit")
+    return cleared
   }
   
   /// Get current memory stats (callable from JS)
@@ -450,7 +480,8 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
       "meshVertexCount": totalMeshVertexCount,
       "meshAnchorCount": totalMeshAnchorCount,
       "meshSizeMB": meshSizeMB,
-      "meshPaused": meshReconstructionPaused
+      "meshPaused": meshReconstructionPaused,
+      "uploadedAnchorCount": uploadedAnchorIDs.count
     ]
   }
 

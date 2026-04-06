@@ -106,6 +106,14 @@ public class ARRulerNativeModule: Module {
         view.resumeMeshReconstruction(session: view.arView.session)
       }
 
+      AsyncFunction("markAnchorsUploaded") { (view: ARRulerNativeView) in
+        view.markAnchorsAsUploaded()
+      }
+
+      AsyncFunction("clearUploadedMeshNodes") { (view: ARRulerNativeView) -> Int in
+        return view.clearUploadedMeshNodes()
+      }
+
       AsyncFunction("exportMesh") { (view: ARRulerNativeView) -> [String: Any] in
         if #available(iOS 13.4, *) {
           return view.exportMesh()

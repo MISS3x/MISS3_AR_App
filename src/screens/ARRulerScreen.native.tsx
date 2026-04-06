@@ -969,9 +969,10 @@ export default function ARRulerScreen({ navigation }: any) {
       if (meshExportEnabled) {
         setFinalizationStep('Exporting mesh...');
         setFinalizationProgress(10);
-        addLogB('📦 Exporting mesh BEFORE stop...');
+        addLogB('📦 Exporting NEW mesh data BEFORE stop...');
         setPrompt('⏳ Capturing mesh...');
         try {
+          // Only export NEW anchors (not yet uploaded during live streaming)
           const chunks = await rulerRef.current?.exportMeshChunks(chunkSizeMB);
           addLogB(`📦 exportMeshChunks returned: ${chunks?.length ?? 'null'} chunks`);
           if (chunks && chunks.length > 0 && !chunks[0].error) {
@@ -997,6 +998,7 @@ export default function ARRulerScreen({ navigation }: any) {
               setMeshChunksUploaded(i + 1);
               addLogMesh(`✅ Chunk ${i+1} uploaded`);
             }
+            // Clean up live chunks
             for (let i = 0; i < 20; i++) {
               const liveFileName = `${userId}/${projectData!.id}_live_chunk_${i}.obj`;
               await supabase.storage.from('mesh-scans').remove([liveFileName]).catch(() => { });
@@ -1010,6 +1012,15 @@ export default function ARRulerScreen({ navigation }: any) {
             }).eq('id', projectData!.id);
             addLogB(`✅ Mesh saved: ${totalV}v ${totalF}f ${chunks.length} chunks (${(totalBytes/1024/1024).toFixed(1)}MB)`);
             setIsUploadingMesh(false);
+            meshSaved = true;
+          } else if (chunks?.[0]?.error?.includes('already uploaded')) {
+            // All anchors were already streamed during live scanning — mesh is already in storage!
+            addLogB(`✅ All mesh data was already streamed during scan — using live chunks`);
+            // Update project with live chunk URL  
+            const { data: urlData } = supabase.storage.from('mesh-scans').getPublicUrl(`${userId}/${projectData!.id}_live_chunk_0.obj`);
+            await supabase.from('ar_projects').update({
+              mesh_url: urlData?.publicUrl || "",
+            }).eq('id', projectData!.id);
             meshSaved = true;
           } else {
             addLogB(`⚠️ No mesh data: ${chunks?.[0]?.error || 'empty'}`);

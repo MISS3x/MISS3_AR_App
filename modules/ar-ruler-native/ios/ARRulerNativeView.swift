@@ -1764,10 +1764,24 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   }
 
   @available(iOS 13.4, *)
-  func exportMeshChunks(maxSizeMB: Int = 10) -> [[String: Any]] {
+  func exportMeshChunks(maxSizeMB: Int = 10, includeUploaded: Bool = false) -> [[String: Any]] {
     guard let session = arView.session.currentFrame else { return [["error": "No AR frame"]] }
-    let anchors = session.anchors.compactMap { $0 as? ARMeshAnchor }
-    guard !anchors.isEmpty else { return [["error": "No mesh data"]] }
+    let allAnchors = session.anchors.compactMap { $0 as? ARMeshAnchor }
+    
+    // Filter out already-uploaded anchors unless explicitly requested
+    let anchors: [ARMeshAnchor]
+    if includeUploaded {
+      anchors = allAnchors
+      print("[Mesh Export] Exporting ALL \(allAnchors.count) anchors (includeUploaded=true)")
+    } else {
+      anchors = allAnchors.filter { !uploadedAnchorIDs.contains($0.identifier) }
+      print("[Mesh Export] Exporting \(anchors.count) new anchors (skipped \(allAnchors.count - anchors.count) uploaded)")
+    }
+    
+    guard !anchors.isEmpty else { 
+      print("[Mesh Export] No new mesh anchors to export")
+      return [["error": "No new mesh data (all \(allAnchors.count) anchors already uploaded)"]] 
+    }
     
     var chunks: [[String: Any]] = []
     let maxSize = maxSizeMB * 1024 * 1024

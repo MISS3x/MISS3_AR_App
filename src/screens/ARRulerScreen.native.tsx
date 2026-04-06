@@ -1499,28 +1499,80 @@ export default function ARRulerScreen({ navigation }: any) {
         showRoomPlan={showRoomPlan}
       />
 
-      {/* ═══ MEMORY STATUS BAR ═══ */}
+      {/* ═══ SCI-FI MEMORY HUD ═══ */}
       {memoryStats && (
         <View style={{
-          position: 'absolute', top: 50, right: 10, 
-          backgroundColor: memoryStats.availableMemoryMB < 400 
-            ? 'rgba(244,67,54,0.85)' 
-            : memoryStats.availableMemoryMB < 600 
-              ? 'rgba(255,152,0,0.7)' 
-              : 'rgba(0,0,0,0.5)',
-          borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4,
-          flexDirection: 'row', alignItems: 'center', gap: 6,
+          position: 'absolute', top: 46, right: 8, width: 160,
+          backgroundColor: 'rgba(10,10,30,0.85)', borderRadius: 10,
+          borderWidth: 1, 
+          borderColor: memoryStats.availableMemoryMB < 300 
+            ? 'rgba(244,67,54,0.8)' 
+            : memoryStats.availableMemoryMB < 500 
+              ? 'rgba(255,152,0,0.6)' 
+              : 'rgba(0,255,100,0.3)',
+          padding: 8, gap: 6,
+          shadowColor: memoryStats.availableMemoryMB < 300 ? '#F44336' : '#00FF66',
+          shadowOpacity: 0.4, shadowRadius: 8, shadowOffset: { width: 0, height: 0 },
         }}>
-          <Text style={{ color: '#FFF', fontSize: 9, fontWeight: 'bold' }}>
-            RAM: {Math.round(memoryStats.availableMemoryMB)}MB
-          </Text>
-          <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 9 }}>|</Text>
-          <Text style={{ color: '#FFF', fontSize: 9 }}>
-            Mesh: {(memoryStats.meshVertexCount / 1000).toFixed(0)}k vtx / {memoryStats.meshSizeMB.toFixed(1)}MB
-          </Text>
-          {memoryStats.meshPaused && (
-            <Text style={{ color: '#FF0', fontSize: 9, fontWeight: 'bold' }}>⏸ PAUSED</Text>
-          )}
+          {/* RAM Bar */}
+          <View>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
+              <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 8, fontWeight: 'bold', letterSpacing: 1 }}>RAM</Text>
+              <Text style={{ color: '#FFF', fontSize: 8, fontWeight: 'bold' }}>
+                {Math.round(memoryStats.availableMemoryMB)}MB free
+              </Text>
+            </View>
+            <View style={{ height: 6, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 3, overflow: 'hidden' }}>
+              <View style={{
+                height: '100%', borderRadius: 3,
+                width: `${Math.min(100, Math.max(5, (1 - memoryStats.availableMemoryMB / 1500) * 100))}%`,
+                backgroundColor: memoryStats.availableMemoryMB < 200 ? '#F44336' 
+                  : memoryStats.availableMemoryMB < 400 ? '#FF9800' 
+                  : memoryStats.availableMemoryMB < 600 ? '#FFC107' 
+                  : '#4CAF50',
+              }} />
+            </View>
+          </View>
+
+          {/* Mesh Bar */}
+          <View>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
+              <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 8, fontWeight: 'bold', letterSpacing: 1 }}>MESH</Text>
+              <Text style={{ color: '#FFF', fontSize: 8 }}>
+                {(memoryStats.meshVertexCount / 1000).toFixed(0)}k vtx
+              </Text>
+            </View>
+            <View style={{ height: 6, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 3, overflow: 'hidden' }}>
+              <View style={{
+                height: '100%', borderRadius: 3,
+                width: `${Math.min(100, Math.max(5, memoryStats.meshSizeMB / 45 * 100))}%`,
+                backgroundColor: memoryStats.meshSizeMB > 40 ? '#F44336' 
+                  : memoryStats.meshSizeMB > 25 ? '#FF9800' 
+                  : memoryStats.meshSizeMB > 15 ? '#FFC107' 
+                  : '#00E676',
+              }} />
+            </View>
+            <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 7, textAlign: 'right', marginTop: 1 }}>
+              {memoryStats.meshSizeMB.toFixed(1)} / 45 MB
+            </Text>
+          </View>
+
+          {/* Status indicator */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+            <View style={{
+              width: 6, height: 6, borderRadius: 3,
+              backgroundColor: memoryStats.meshPaused ? '#F44336' 
+                : memoryStats.availableMemoryMB < 400 ? '#FF9800' 
+                : '#00E676',
+              shadowColor: memoryStats.meshPaused ? '#F44336' : '#00E676',
+              shadowOpacity: 1, shadowRadius: 4,
+            }} />
+            <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 7, fontWeight: 'bold', letterSpacing: 0.5 }}>
+              {memoryStats.meshPaused ? '⏸ MESH PAUSED' 
+                : memoryStats.availableMemoryMB < 400 ? '⚡ HIGH LOAD' 
+                : `● ${memoryStats.meshAnchorCount} anchors`}
+            </Text>
+          </View>
         </View>
       )}
 
@@ -1534,31 +1586,40 @@ export default function ARRulerScreen({ navigation }: any) {
           <View style={{
             backgroundColor: '#1a1a2e', borderRadius: 16, padding: 24,
             width: '85%', borderWidth: 1, borderColor: '#F44336',
+            shadowColor: '#F44336', shadowOpacity: 0.6, shadowRadius: 20,
           }}>
-            <Text style={{ color: '#F44336', fontSize: 18, fontWeight: 'bold', textAlign: 'center', marginBottom: 8 }}>
-              ⚠️ Low Memory
+            <Text style={{ color: '#F44336', fontSize: 20, fontWeight: 'bold', textAlign: 'center', marginBottom: 8 }}>
+              ⚠️ MEMORY CRITICAL
             </Text>
             <Text style={{ color: '#FFF', fontSize: 14, textAlign: 'center', marginBottom: 4 }}>
-              {memoryAlertMessage}
+              Mesh scan paused to prevent crash.
             </Text>
             {memoryStats && (
-              <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12, textAlign: 'center', marginBottom: 16 }}>
-                RAM: {Math.round(memoryStats.availableMemoryMB)}MB free{'\n'}
-                Mesh: {(memoryStats.meshVertexCount / 1000).toFixed(0)}k vertices ({memoryStats.meshSizeMB.toFixed(1)}MB)
-              </Text>
+              <View style={{ backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 8, padding: 10, marginVertical: 10 }}>
+                <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 12, textAlign: 'center' }}>
+                  🧠 RAM: {Math.round(memoryStats.availableMemoryMB)}MB free
+                </Text>
+                <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 12, textAlign: 'center' }}>
+                  📐 Mesh: {(memoryStats.meshVertexCount / 1000).toFixed(0)}k vertices ({memoryStats.meshSizeMB.toFixed(1)}MB)
+                </Text>
+              </View>
             )}
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <TouchableOpacity
-                style={{ flex: 1, backgroundColor: '#4CAF50', borderRadius: 10, paddingVertical: 12, alignItems: 'center' }}
+                style={{ flex: 1, backgroundColor: '#4CAF50', borderRadius: 10, paddingVertical: 14, alignItems: 'center',
+                  shadowColor: '#4CAF50', shadowOpacity: 0.5, shadowRadius: 8 }}
                 onPress={() => { setShowMemoryAlert(false); rulerRef.current?.resumeMesh?.(); }}
               >
-                <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 14 }}>▶ Resume</Text>
+                <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 15 }}>▶ Resume</Text>
+                <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 9 }}>Continue scanning</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={{ flex: 1, backgroundColor: '#FF9800', borderRadius: 10, paddingVertical: 12, alignItems: 'center' }}
+                style={{ flex: 1, backgroundColor: '#FF9800', borderRadius: 10, paddingVertical: 14, alignItems: 'center',
+                  shadowColor: '#FF9800', shadowOpacity: 0.5, shadowRadius: 8 }}
                 onPress={() => { setShowMemoryAlert(false); /* TODO: upload mesh then clear */ }}
               >
-                <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 14 }}>☁ Upload & Clear</Text>
+                <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 15 }}>☁ Upload</Text>
+                <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 9 }}>Save & free memory</Text>
               </TouchableOpacity>
             </View>
           </View>

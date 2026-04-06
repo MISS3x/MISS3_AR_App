@@ -1645,40 +1645,42 @@ export default function ARRulerScreen({ navigation }: any) {
             </View>
           )}
         </View>
-        {/* Top Right Controls — LOGOUT + DELETE ALL */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          {userId && (
-            <TouchableOpacity
-              style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' }}
-              onPress={async () => { await supabase.auth.signOut(); setUserId(null); setProjectData(null); }}
-            >
-              <Text style={{ color: '#FFF', fontSize: 10, fontWeight: 'bold' }}>LOGOUT</Text>
-            </TouchableOpacity>
-          )}
+        {/* Top Right Controls — SYNC + DELETE ALL */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <TouchableOpacity
+            onPress={() => setShowDebugPanel(!showDebugPanel)}
+            style={{ paddingHorizontal: 10, paddingVertical: 6, backgroundColor: showDebugPanel ? 'rgba(0,255,102,0.2)' : 'rgba(0,0,0,0.6)', borderRadius: 16, borderWidth: 1, borderColor: showDebugPanel ? '#00FF66' : 'rgba(255,255,255,0.2)' }}
+          >
+            <Text style={{ color: showDebugPanel ? '#00FF66' : '#FFF', fontSize: 10, fontWeight: 'bold' }}>{showDebugPanel ? '▼ SYNC' : '▶ SYNC'}</Text>
+          </TouchableOpacity>
 
           {shapeCount > 0 && (
             <TouchableOpacity
-              style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#FF1744', borderWidth: 2, borderColor: '#FF1744', alignItems: 'center', justifyContent: 'center' }}
+              style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#FF1744', alignItems: 'center', justifyContent: 'center' }}
               onPress={handleReset}
               activeOpacity={0.7}
             >
-              <Text style={{ color: '#FFF', fontSize: 20, fontWeight: 'bold', lineHeight: 22, marginTop: -2 }}>✕</Text>
+              <Text style={{ color: '#FFF', fontSize: 16, fontWeight: 'bold', lineHeight: 18 }}>✕</Text>
             </TouchableOpacity>
           )}
         </View>
       </View>
 
-      {/* Compact status bar — login + HIDE toggle on one line */}
-      <View style={{ position: 'absolute', right: 12, top: insets.top + 48, left: 12, zIndex: 100, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-        <Text style={{ color: userId ? '#0f0' : '#f66', fontSize: 8, fontFamily: 'monospace', flex: 1 }}>
-          {userId ? `● ${userEmail}` : '○ Anon'} | S:{shapeCount} P:{pendingCount} ✓:{uploadedCount}
-        </Text>
-        <TouchableOpacity
-          onPress={() => setShowDebugPanel(!showDebugPanel)}
-          style={{ backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}
-        >
-          <Text style={{ color: '#0f0', fontSize: 9, fontFamily: 'monospace' }}>{showDebugPanel ? '▼ HIDE' : '▶ SYNC'}</Text>
-        </TouchableOpacity>
+      {/* Compact status bar — email + logout + stats */}
+      <View style={{ position: 'absolute', right: 12, top: insets.top + 48, left: 12, zIndex: 100 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Text style={{ color: userId ? '#0f0' : '#f66', fontSize: 8, fontFamily: 'monospace', flex: 1 }}>
+            {userId ? `● ${userEmail}` : '○ Anon'} | S:{shapeCount} P:{pendingCount} ✓:{uploadedCount}
+          </Text>
+          {userId && (
+            <TouchableOpacity
+              onPress={async () => { await supabase.auth.signOut(); setUserId(null); setProjectData(null); }}
+              style={{ backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}
+            >
+              <Text style={{ color: '#f66', fontSize: 8, fontFamily: 'monospace' }}>LOGOUT</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
 

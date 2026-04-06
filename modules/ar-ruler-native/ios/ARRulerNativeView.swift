@@ -3,6 +3,7 @@ import ARKit
 import SceneKit
 import UIKit
 import Metal
+import os.proc
 
 #if canImport(RoomPlan)
 import RoomPlan
@@ -12,6 +13,17 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   let arView = ARSCNView(frame: .zero)
   let onUpdate = EventDispatcher()
   let onPlaneStateChange = EventDispatcher()
+  
+  // ═══ MEMORY MONITORING ═══
+  private var lastMemoryCheckTime: TimeInterval = 0
+  private let memoryCheckInterval: TimeInterval = 2.0  // check every 2 seconds
+  private let criticalMemoryThresholdMB: Float = 200   // auto-pause below 200MB free
+  private let warningMemoryThresholdMB: Float = 400    // warn below 400MB free
+  private var meshReconstructionPaused = false
+  private var totalMeshVertexCount: Int = 0
+  private var totalMeshAnchorCount: Int = 0
+  private var lastMeshUpdateTimes: [UUID: TimeInterval] = [:]  // throttle per-anchor
+  private let meshUpdateThrottle: TimeInterval = 1.0   // max 1 update/sec per anchor
 
   // State
   enum DrawingMode: String {
@@ -226,6 +238,7 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   
   func session(_ session: ARSession, didUpdate frame: ARFrame) {
     updatePointer(frame: frame)
+    checkMemoryPressure(frame: frame, session: session)
   }
   
   // Auto-detect floor from ARPlaneAnchor
@@ -275,6 +288,14 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   func renderer(_ renderer: SCNSceneRenderer, didUpdate node: SCNNode, for anchor: ARAnchor) {
       if #available(iOS 13.4, *) {
           if let meshAnchor = anchor as? ARMeshAnchor {
+              // ═══ THROTTLE: max 1 geometry update per second per anchor ═══
+              let now = CACurrentMediaTime()
+              if let lastUpdate = lastMeshUpdateTimes[meshAnchor.identifier],
+                 now - lastUpdate < meshUpdateThrottle {
+                  return // skip this update
+              }
+              lastMeshUpdateTimes[meshAnchor.identifier] = now
+              
               if node.childNodes.count == 2 {
                   let occNode = node.childNodes[0]
                   let visNode = node.childNodes[1]
@@ -312,6 +333,126 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
       let geometryElement = SCNGeometryElement(data: data, primitiveType: .triangles, primitiveCount: faces.count, bytesPerIndex: faces.bytesPerIndex)
       
       return SCNGeometry(sources: [vertexSource, normalSource], elements: [geometryElement])
+  }
+
+  // MARK: - Memory Monitoring
+  
+  private func checkMemoryPressure(frame: ARFrame, session: ARSession) {
+    let now = frame.timestamp
+    guard now - lastMemoryCheckTime > memoryCheckInterval else { return }
+    lastMemoryCheckTime = now
+    
+    // Get available memory
+    let availableMB = getAvailableMemoryMB()
+    
+    // Count mesh stats
+    if #available(iOS 13.4, *) {
+      let meshAnchors = frame.anchors.compactMap { $0 as? ARMeshAnchor }
+      totalMeshAnchorCount = meshAnchors.count
+      totalMeshVertexCount = meshAnchors.reduce(0) { $0 + $1.geometry.vertices.count }
+    }
+    
+    // Send memory stats to JS every check
+    let meshSizeMB = Float(totalMeshVertexCount * 12) / (1024 * 1024) // 12 bytes per vertex (xyz float)
+    onUpdate([
+      "event": "memory_stats",
+      "availableMemoryMB": availableMB,
+      "meshVertexCount": totalMeshVertexCount,
+      "meshAnchorCount": totalMeshAnchorCount,
+      "meshSizeMB": meshSizeMB,
+      "meshPaused": meshReconstructionPaused
+    ])
+    
+    // AUTO-PAUSE: Critical memory
+    if availableMB < criticalMemoryThresholdMB && !meshReconstructionPaused {
+      pauseMeshReconstruction(session: session, reason: "critical")
+    }
+    // WARNING: Low memory
+    else if availableMB < warningMemoryThresholdMB && !meshReconstructionPaused {
+      onUpdate([
+        "event": "memory_warning",
+        "availableMemoryMB": availableMB,
+        "message": "Low memory (\(Int(availableMB))MB free). Consider pausing scan."
+      ])
+    }
+    // AUTO-RESUME: If memory recovered and was auto-paused
+    else if availableMB > warningMemoryThresholdMB && meshReconstructionPaused {
+      // Don't auto-resume—let user decide
+    }
+  }
+  
+  private func getAvailableMemoryMB() -> Float {
+    var info = mach_task_basic_info()
+    var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size) / 4
+    let result = withUnsafeMutablePointer(to: &info) {
+      $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
+        task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
+      }
+    }
+    
+    if result == KERN_SUCCESS {
+      let usedMB = Float(info.resident_size) / (1024 * 1024)
+      // iOS typically gives ~1.5-2GB before killing
+      let estimatedTotalMB: Float = 1500
+      return max(0, estimatedTotalMB - usedMB)
+    }
+    
+    // Fallback: use os_proc_available_memory if available
+    if #available(iOS 13.0, *) {
+      let available = os_proc_available_memory()
+      return Float(available) / (1024 * 1024)
+    }
+    
+    return 500 // assume plenty if we can't check
+  }
+  
+  func pauseMeshReconstruction(session: ARSession, reason: String) {
+    guard !meshReconstructionPaused else { return }
+    meshReconstructionPaused = true
+    
+    print("[Memory] ⚠️ Pausing mesh reconstruction — reason: \(reason)")
+    
+    // Re-run session WITHOUT mesh reconstruction
+    let config = ARWorldTrackingConfiguration()
+    config.planeDetection = [.horizontal, .vertical]
+    // NO sceneReconstruction = .mesh → stops adding new mesh anchors
+    session.run(config)
+    
+    onUpdate([
+      "event": "mesh_auto_paused",
+      "reason": reason,
+      "availableMemoryMB": getAvailableMemoryMB(),
+      "meshVertexCount": totalMeshVertexCount,
+      "meshAnchorCount": totalMeshAnchorCount,
+      "message": "Mesh reconstruction paused (\(reason)). Tap to upload & clear mesh."
+    ])
+  }
+  
+  func resumeMeshReconstruction(session: ARSession) {
+    print("[Memory] ✅ Resuming mesh reconstruction")
+    meshReconstructionPaused = false
+    
+    let config = ARWorldTrackingConfiguration()
+    config.planeDetection = [.horizontal, .vertical]
+    if #available(iOS 13.4, *), ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) {
+      config.sceneReconstruction = .mesh
+    }
+    session.run(config)
+    
+    onUpdate(["event": "mesh_resumed"])
+  }
+  
+  /// Get current memory stats (callable from JS)
+  func getMemoryStats() -> [String: Any] {
+    let availableMB = getAvailableMemoryMB()
+    let meshSizeMB = Float(totalMeshVertexCount * 12) / (1024 * 1024)
+    return [
+      "availableMemoryMB": availableMB,
+      "meshVertexCount": totalMeshVertexCount,
+      "meshAnchorCount": totalMeshAnchorCount,
+      "meshSizeMB": meshSizeMB,
+      "meshPaused": meshReconstructionPaused
+    ]
   }
 
   // MARK: - Pointer Update

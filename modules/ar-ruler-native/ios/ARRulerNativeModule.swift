@@ -93,6 +93,19 @@ public class ARRulerNativeModule: Module {
         return view.saveOpenShape()
       }
 
+      // ═══ MEMORY MONITORING ═══
+      AsyncFunction("getMemoryStats") { (view: ARRulerNativeView) -> [String: Any] in
+        return view.getMemoryStats()
+      }
+
+      AsyncFunction("pauseMesh") { (view: ARRulerNativeView) in
+        view.pauseMeshReconstruction(session: view.arView.session, reason: "user_request")
+      }
+
+      AsyncFunction("resumeMesh") { (view: ARRulerNativeView) in
+        view.resumeMeshReconstruction(session: view.arView.session)
+      }
+
       AsyncFunction("exportMesh") { (view: ARRulerNativeView) -> [String: Any] in
         if #available(iOS 13.4, *) {
           return view.exportMesh()

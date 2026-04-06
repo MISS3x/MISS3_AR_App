@@ -87,6 +87,13 @@ export default function ARRulerScreen({ navigation }: any) {
   const [logsMesh, setLogsMesh] = useState<string[]>([]); // meshes
   const [logsA, setLogsA] = useState<string[]>([]); // anchors (always on)
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
+  // ═══ MEMORY MONITORING ═══
+  const [memoryStats, setMemoryStats] = useState<{
+    availableMemoryMB: number; meshVertexCount: number; meshAnchorCount: number;
+    meshSizeMB: number; meshPaused: boolean;
+  } | null>(null);
+  const [showMemoryAlert, setShowMemoryAlert] = useState(false);
+  const [memoryAlertMessage, setMemoryAlertMessage] = useState('');
   const ts = () => new Date().toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   const addLog = useCallback((msg: string) => {
     setDebugLogs(prev => [`[${ts()}] ${msg}`, ...prev].slice(0, 30));
@@ -389,6 +396,28 @@ export default function ARRulerScreen({ navigation }: any) {
       setFloorDetected(false);
       setShapeCount(0);
       setPrompt(drawingMode === 'floor' ? "Move phone to scan floor..." : drawingMode === 'free' ? "Free mode — any surface" : "Scan wall to begin");
+    }
+    // ═══ MEMORY EVENTS ═══
+    else if (nativeEvent.event === 'memory_stats') {
+      setMemoryStats({
+        availableMemoryMB: nativeEvent.availableMemoryMB || 0,
+        meshVertexCount: nativeEvent.meshVertexCount || 0,
+        meshAnchorCount: nativeEvent.meshAnchorCount || 0,
+        meshSizeMB: nativeEvent.meshSizeMB || 0,
+        meshPaused: nativeEvent.meshPaused || false,
+      });
+    }
+    else if (nativeEvent.event === 'memory_warning') {
+      addLog(`⚠️ RAM LOW: ${Math.round(nativeEvent.availableMemoryMB)}MB free`);
+    }
+    else if (nativeEvent.event === 'mesh_auto_paused') {
+      setShowMemoryAlert(true);
+      setMemoryAlertMessage(nativeEvent.message || 'Mesh paused — low memory');
+      addLog(`🛑 MESH PAUSED: ${nativeEvent.reason} — ${Math.round(nativeEvent.availableMemoryMB)}MB free, ${nativeEvent.meshVertexCount} vertices`);
+    }
+    else if (nativeEvent.event === 'mesh_resumed') {
+      setShowMemoryAlert(false);
+      addLog('✅ Mesh resumed');
     }
   };
 
@@ -1469,6 +1498,72 @@ export default function ARRulerScreen({ navigation }: any) {
         showWire={showWire}
         showRoomPlan={showRoomPlan}
       />
+
+      {/* ═══ MEMORY STATUS BAR ═══ */}
+      {memoryStats && (
+        <View style={{
+          position: 'absolute', top: 50, right: 10, 
+          backgroundColor: memoryStats.availableMemoryMB < 400 
+            ? 'rgba(244,67,54,0.85)' 
+            : memoryStats.availableMemoryMB < 600 
+              ? 'rgba(255,152,0,0.7)' 
+              : 'rgba(0,0,0,0.5)',
+          borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4,
+          flexDirection: 'row', alignItems: 'center', gap: 6,
+        }}>
+          <Text style={{ color: '#FFF', fontSize: 9, fontWeight: 'bold' }}>
+            RAM: {Math.round(memoryStats.availableMemoryMB)}MB
+          </Text>
+          <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 9 }}>|</Text>
+          <Text style={{ color: '#FFF', fontSize: 9 }}>
+            Mesh: {(memoryStats.meshVertexCount / 1000).toFixed(0)}k vtx / {memoryStats.meshSizeMB.toFixed(1)}MB
+          </Text>
+          {memoryStats.meshPaused && (
+            <Text style={{ color: '#FF0', fontSize: 9, fontWeight: 'bold' }}>⏸ PAUSED</Text>
+          )}
+        </View>
+      )}
+
+      {/* ═══ MEMORY ALERT MODAL ═══ */}
+      {showMemoryAlert && (
+        <View style={{
+          position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center',
+          zIndex: 999,
+        }}>
+          <View style={{
+            backgroundColor: '#1a1a2e', borderRadius: 16, padding: 24,
+            width: '85%', borderWidth: 1, borderColor: '#F44336',
+          }}>
+            <Text style={{ color: '#F44336', fontSize: 18, fontWeight: 'bold', textAlign: 'center', marginBottom: 8 }}>
+              ⚠️ Low Memory
+            </Text>
+            <Text style={{ color: '#FFF', fontSize: 14, textAlign: 'center', marginBottom: 4 }}>
+              {memoryAlertMessage}
+            </Text>
+            {memoryStats && (
+              <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12, textAlign: 'center', marginBottom: 16 }}>
+                RAM: {Math.round(memoryStats.availableMemoryMB)}MB free{'\n'}
+                Mesh: {(memoryStats.meshVertexCount / 1000).toFixed(0)}k vertices ({memoryStats.meshSizeMB.toFixed(1)}MB)
+              </Text>
+            )}
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <TouchableOpacity
+                style={{ flex: 1, backgroundColor: '#4CAF50', borderRadius: 10, paddingVertical: 12, alignItems: 'center' }}
+                onPress={() => { setShowMemoryAlert(false); rulerRef.current?.resumeMesh?.(); }}
+              >
+                <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 14 }}>▶ Resume</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ flex: 1, backgroundColor: '#FF9800', borderRadius: 10, paddingVertical: 12, alignItems: 'center' }}
+                onPress={() => { setShowMemoryAlert(false); /* TODO: upload mesh then clear */ }}
+              >
+                <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 14 }}>☁ Upload & Clear</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
 
       {/* Header */}
       <View style={[styles.headerOverlay, { paddingTop: insets.top + spacing.sm }]}>

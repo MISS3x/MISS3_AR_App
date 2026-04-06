@@ -114,6 +114,10 @@ public class ARRulerNativeModule: Module {
         return view.clearUploadedMeshNodes()
       }
 
+      AsyncFunction("setXRayMode") { (view: ARRulerNativeView, enabled: Bool) in
+        view.setXRayMode(enabled: enabled)
+      }
+
       AsyncFunction("exportMesh") { (view: ARRulerNativeView) -> [String: Any] in
         if #available(iOS 13.4, *) {
           return view.exportMesh()

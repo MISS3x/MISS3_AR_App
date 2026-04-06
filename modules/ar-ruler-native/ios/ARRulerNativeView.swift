@@ -37,6 +37,52 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   private var scannerLightNode: SCNLight?
   public var showVisualGuides: Bool = true
   
+  // X-Ray mode: disables occluder, shows wireframe through walls with classification colors
+  public var xrayMode: Bool = false
+  
+  // Classification colors for mesh faces
+  private func classificationColor(for anchor: ARMeshAnchor, faceIndex: Int) -> UIColor {
+    if #available(iOS 13.4, *) {
+      guard let classification = anchor.geometry.classification else { return .white }
+      let classId = classification.buffer.contents().load(fromByteOffset: faceIndex, as: UInt8.self)
+      switch classId {
+      case 1: return UIColor(red: 0.3, green: 0.5, blue: 1.0, alpha: 1.0) // Wall - blue
+      case 2: return UIColor(red: 0.2, green: 0.9, blue: 0.3, alpha: 1.0) // Floor - green
+      case 3: return UIColor(red: 0.6, green: 0.6, blue: 0.7, alpha: 1.0) // Ceiling - grey
+      case 4: return UIColor(red: 0.8, green: 0.6, blue: 0.2, alpha: 1.0) // Table - brown
+      case 5: return UIColor(red: 0.9, green: 0.7, blue: 0.3, alpha: 1.0) // Seat - gold
+      case 6: return UIColor(red: 0.0, green: 0.9, blue: 0.9, alpha: 1.0) // Window - cyan
+      case 7: return UIColor(red: 0.9, green: 0.4, blue: 0.1, alpha: 1.0) // Door - orange
+      default: return UIColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 0.3) // Unknown - dim white
+      }
+    }
+    return .white
+  }
+  
+  // Get dominant classification for an anchor (most common class)
+  private func dominantColor(for anchor: ARMeshAnchor) -> UIColor {
+    if #available(iOS 13.4, *) {
+      guard let classification = anchor.geometry.classification else { return .white }
+      var counts: [UInt8: Int] = [:]
+      let faceCount = anchor.geometry.faces.count
+      let ptr = classification.buffer.contents()
+      for i in 0..<faceCount {
+        let c = ptr.load(fromByteOffset: i, as: UInt8.self)
+        counts[c, default: 0] += 1
+      }
+      let dominant = counts.max(by: { $0.value < $1.value })?.key ?? 0
+      switch dominant {
+      case 1: return UIColor(red: 0.3, green: 0.5, blue: 1.0, alpha: 1.0) // Wall
+      case 2: return UIColor(red: 0.2, green: 0.9, blue: 0.3, alpha: 1.0) // Floor
+      case 3: return UIColor(red: 0.6, green: 0.6, blue: 0.7, alpha: 1.0) // Ceiling
+      case 6: return UIColor(red: 0.0, green: 0.9, blue: 0.9, alpha: 1.0) // Window
+      case 7: return UIColor(red: 0.9, green: 0.4, blue: 0.1, alpha: 1.0) // Door
+      default: return .white
+      }
+    }
+    return .white
+  }
+  
   // Tron Blue for floor mode
   private let tronBlue = UIColor(red: 0.2, green: 0.8, blue: 1.0, alpha: 1.0)
   private let measureYellow = UIColor(red: 1.0, green: 0.85, blue: 0.0, alpha: 1.0)
@@ -259,20 +305,24 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
           if let meshAnchor = anchor as? ARMeshAnchor {
               let rootNode = SCNNode()
               
-              // 1) Occluder
+              // 1) Occluder — hidden in X-Ray mode
               let occGeometry = createGeometry(from: meshAnchor)
               occGeometry.firstMaterial?.colorBufferWriteMask = []
               let occNode = SCNNode(geometry: occGeometry)
+              occNode.isHidden = xrayMode
               rootNode.addChildNode(occNode)
               
-              // 2) Wireframe — Matrix X-ray style
+              // 2) Wireframe — classification-colored in X-Ray mode
               let visGeometry = createGeometry(from: meshAnchor)
               let visMat = SCNMaterial()
               visMat.fillMode = .lines
-              visMat.lightingModel = .lambert
-              visMat.ambient.contents = UIColor.black
-              visMat.locksAmbientWithDiffuse = false
-              visMat.diffuse.contents = UIColor.white
+              visMat.lightingModel = .constant  // no lighting in X-Ray for clearer view
+              if xrayMode {
+                visMat.diffuse.contents = dominantColor(for: meshAnchor)
+                visMat.transparency = 0.7
+              } else {
+                visMat.diffuse.contents = UIColor.white
+              }
               visGeometry.firstMaterial = visMat
               
               let visNode = SCNNode(geometry: visGeometry)
@@ -304,6 +354,9 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
                   let occNode = node.childNodes[0]
                   let visNode = node.childNodes[1]
                   
+                  // Update occluder visibility based on X-Ray mode
+                  occNode.isHidden = xrayMode
+                  
                   let newGeom = createGeometry(from: meshAnchor)
                   
                   let occGeom = newGeom.copy() as! SCNGeometry
@@ -314,10 +367,13 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
                   let visGeom = newGeom.copy() as! SCNGeometry
                   let visMat = SCNMaterial()
                   visMat.fillMode = .lines
-                  visMat.lightingModel = .lambert
-                  visMat.ambient.contents = UIColor.black
-                  visMat.locksAmbientWithDiffuse = false
-                  visMat.diffuse.contents = UIColor.white
+                  visMat.lightingModel = .constant
+                  if xrayMode {
+                    visMat.diffuse.contents = dominantColor(for: meshAnchor)
+                    visMat.transparency = 0.7
+                  } else {
+                    visMat.diffuse.contents = UIColor.white
+                  }
                   visGeom.firstMaterial = visMat
                   visNode.geometry = visGeom
               }
@@ -436,6 +492,42 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
     // Mesh reconstruction continues automatically since session still has .mesh config
     // No need to re-run session
     onUpdate(["event": "mesh_resumed"])
+  }
+  
+  /// Toggle X-Ray mode — instantly updates all mesh nodes
+  func setXRayMode(enabled: Bool) {
+    xrayMode = enabled
+    print("[X-Ray] Mode: \(enabled ? "ON" : "OFF")")
+    
+    // Immediately update ALL existing mesh nodes
+    guard let frame = arView.session.currentFrame else { return }
+    for anchor in frame.anchors {
+      guard let meshAnchor = anchor as? ARMeshAnchor else { continue }
+      guard let node = arView.node(for: meshAnchor) else { continue }
+      guard node.childNodes.count == 2 else { continue }
+      
+      let occNode = node.childNodes[0]
+      let visNode = node.childNodes[1]
+      
+      // Toggle occluder
+      occNode.isHidden = enabled
+      
+      // Update wireframe color
+      if let visMat = visNode.geometry?.firstMaterial {
+        if enabled {
+          visMat.diffuse.contents = dominantColor(for: meshAnchor)
+          visMat.transparency = 0.7
+        } else {
+          visMat.diffuse.contents = UIColor.white
+          visMat.transparency = 1.0
+        }
+      }
+    }
+    
+    onUpdate([
+      "event": "xray_toggled",
+      "enabled": enabled
+    ])
   }
   
   /// Mark mesh anchor IDs as uploaded (skip future geometry updates for these)

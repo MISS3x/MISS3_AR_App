@@ -25,6 +25,7 @@ export default function ARRulerScreen({ navigation }: any) {
   const [drawingMode, setDrawingMode] = useState<'floor' | 'free' | 'wall'>('floor');
   const [shapeCount, setShapeCount] = useState(0);
   const [showWire, setShowWire] = useState(true);
+  const [xrayMode, setXrayMode] = useState(false);
   const [showRoomPlan, setShowRoomPlan] = useState(true);
 
   // Auto-edge detection
@@ -1934,6 +1935,20 @@ export default function ARRulerScreen({ navigation }: any) {
           activeOpacity={0.7}
         >
           <Text style={[styles.circleBtnText, showWire && { color: '#000' }]}>WIRE</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.circleBtn, xrayMode && { borderColor: '#FF1744', backgroundColor: '#FF1744' }]}
+          onPress={async () => {
+            const newMode = !xrayMode;
+            setXrayMode(newMode);
+            await rulerRef.current?.setXRayMode?.(newMode);
+            addLogB(`💀 X-Ray: ${newMode ? 'ON' : 'OFF'}`);
+          }}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.circleBtnText, xrayMode && { color: '#FFF' }]}>💀</Text>
+          <Text style={{ color: xrayMode ? '#FFF' : '#888', fontSize: 6, fontWeight: 'bold', marginTop: -2 }}>XRAY</Text>
         </TouchableOpacity>
 
         <TouchableOpacity

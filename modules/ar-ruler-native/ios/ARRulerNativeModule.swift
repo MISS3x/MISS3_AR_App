@@ -294,6 +294,11 @@ public class ARRulerNativeModule: Module {
         view.clearTapeVisualizations()
       }
 
+      AsyncFunction("setPhotoQuality") { (view: ARRulerNativeView, quality: String) in
+        view.photoQuality = quality
+        print("[Photo] Quality set to: \(quality)")
+      }
+
       AsyncFunction("takePhoto") { (view: ARRulerNativeView, promise: Promise) in
         view.takePhoto(promise: promise)
       }

@@ -3323,6 +3323,9 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   }
 
   // MARK: - Photo Capture
+  // Photo quality: "low" = 0.4 comp + 50% scale, "medium" = 0.7 comp full res, "high" = 0.95 comp full res
+  var photoQuality: String = "medium"
+  
   func takePhoto(promise: ExpoModulesCore.Promise) {
     guard let frame = arView.session.currentFrame else {
       promise.reject("ERR", "No AR frame available")
@@ -3332,18 +3335,49 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
     let pixelBuffer = frame.capturedImage
     let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
     let context = CIContext()
-    guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else {
+    
+    // Determine quality settings
+    let compression: CGFloat
+    let scale: CGFloat
+    switch photoQuality {
+    case "low":
+      compression = 0.4
+      scale = 0.5
+    case "high":
+      compression = 0.95
+      scale = 1.0
+    default: // medium
+      compression = 0.7
+      scale = 1.0
+    }
+    
+    // Optionally scale down for low quality
+    let processedImage: CIImage
+    if scale < 1.0 {
+      let scaleTransform = CGAffineTransform(scaleX: scale, y: scale)
+      processedImage = ciImage.transformed(by: scaleTransform)
+    } else {
+      processedImage = ciImage
+    }
+    
+    guard let cgImage = context.createCGImage(processedImage, from: processedImage.extent) else {
       promise.reject("ERR", "Could not create CGImage")
       return
     }
     
     // ARKit capturedImage is 90 deg rotated cw in portrait layout.
     let uiImage = UIImage(cgImage: cgImage, scale: 1.0, orientation: .right)
+    let originalSize = ciImage.extent.size
+    let finalSize = processedImage.extent.size
+    print("[Photo] Quality: \(photoQuality), compression: \(compression), scale: \(scale)")
+    print("[Photo] Original: \(Int(originalSize.width))x\(Int(originalSize.height)) → Final: \(Int(finalSize.width))x\(Int(finalSize.height))")
     
-    guard let data = uiImage.jpegData(compressionQuality: 0.8) else {
+    guard let data = uiImage.jpegData(compressionQuality: compression) else {
       promise.reject("ERR", "Could not compress image to JPEG")
       return
     }
+    
+    print("[Photo] JPEG size: \(data.count / 1024)KB")
     
     let fm = FileManager.default
     let path = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jpg")
@@ -3362,7 +3396,10 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
       
       promise.resolve([
         "uri": path.absoluteString,
-        "transform": matrix
+        "transform": matrix,
+        "width": Int(finalSize.width),
+        "height": Int(finalSize.height),
+        "fileSizeKB": data.count / 1024
       ])
     } catch {
       promise.reject("ERR", "Could not write photo to \(path)")
@@ -4595,10 +4632,83 @@ class RoomPlanController: NSObject, RoomCaptureSessionDelegate, NSCoding {
             "doorCount": doors.count,
             "windowCount": windows.count,
             "objectCount": objects.count,
+            "floorCount": floors.count,
             "isFinalized": isFinalized,
             "inferredCeilingY": inferredCeilingY as Any,
-            "inferredFloorY": inferredFloorY as Any
+            "inferredFloorY": inferredFloorY as Any,
+            // Computed measurements
+            "floorAreaM2": computeFloorArea(room: room),
+            "perimeterM": computePerimeter(room: room),
+            "ceilingHeightM": computeCeilingHeight(room: room)
         ]
+    }
+    
+    private func computeFloorArea(room: CapturedRoom) -> Float {
+        // Floor area from floor surfaces (iOS 17+) 
+        if #available(iOS 17.0, *) {
+            if !room.floors.isEmpty {
+                var totalArea: Float = 0
+                for floor in room.floors {
+                    // dimensions.x = width, dimensions.z = depth
+                    totalArea += floor.dimensions.x * floor.dimensions.z
+                }
+                print("[RoomPlan] Floor area from \(room.floors.count) floor surfaces: \(totalArea) m²")
+                return totalArea
+            }
+        }
+        
+        // Fallback: estimate from wall positions (convex hull area)
+        guard room.walls.count >= 3 else { return 0 }
+        var points: [(Float, Float)] = []
+        for wall in room.walls {
+            let x = wall.transform.columns.3.x
+            let z = wall.transform.columns.3.z
+            points.append((x, z))
+        }
+        // Shoelace formula for polygon area
+        let area = abs(shoelaceArea(points: points))
+        print("[RoomPlan] Floor area estimated from \(room.walls.count) wall centers: \(area) m²")
+        return area
+    }
+    
+    private func computePerimeter(room: CapturedRoom) -> Float {
+        guard !room.walls.isEmpty else { return 0 }
+        // Sum of wall widths = perimeter
+        var perimeter: Float = 0
+        for wall in room.walls {
+            perimeter += wall.dimensions.x  // width of each wall segment
+        }
+        print("[RoomPlan] Perimeter from \(room.walls.count) walls: \(perimeter) m")
+        return perimeter
+    }
+    
+    private func computeCeilingHeight(room: CapturedRoom) -> Float {
+        // Average wall height
+        guard !room.walls.isEmpty else { return 0 }
+        var totalH: Float = 0
+        for wall in room.walls {
+            totalH += wall.dimensions.y
+        }
+        let avg = totalH / Float(room.walls.count)
+        print("[RoomPlan] Ceiling height (avg wall): \(avg) m")
+        return avg
+    }
+    
+    private func shoelaceArea(points: [(Float, Float)]) -> Float {
+        guard points.count >= 3 else { return 0 }
+        // Sort points by angle from centroid for convex hull approximation
+        let cx = points.reduce(0.0) { $0 + Float($1.0) } / Float(points.count)
+        let cz = points.reduce(0.0) { $0 + Float($1.1) } / Float(points.count)
+        let sorted = points.sorted { atan2($0.1 - cz, $0.0 - cx) < atan2($1.1 - cz, $1.0 - cx) }
+        
+        var area: Float = 0
+        let n = sorted.count
+        for i in 0..<n {
+            let j = (i + 1) % n
+            area += sorted[i].0 * sorted[j].1
+            area -= sorted[j].0 * sorted[i].1
+        }
+        return abs(area) / 2.0
     }
     
     private func surfaceToDict(id: UUID, dimensions: simd_float3, transform: simd_float4x4, category: String) -> [String: Any] {

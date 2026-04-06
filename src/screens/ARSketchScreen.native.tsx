@@ -597,33 +597,30 @@ export default function ARSketchScreen({ navigation }: any) {
             let corners = generateRectPoints(newPoints[0], newPoints[1], newPoints[2]);
             
             // ═══ ENSURE CCW WINDING (normals UP = +Y) ═══
-            // Cross product of edge01 × edge03 should point up (positive Y)
             const e01x = corners[1].x - corners[0].x;
-            const e01y = corners[1].y - corners[0].y;
             const e01z = corners[1].z - corners[0].z;
             const e03x = corners[3].x - corners[0].x;
-            const e03y = corners[3].y - corners[0].y;
             const e03z = corners[3].z - corners[0].z;
-            // Cross product Y component: e01z * e03x - e01x * e03z
             const crossY = e01z * e03x - e01x * e03z;
             if (crossY < 0) {
-              // CW order → reverse to CCW so normal points up
               corners = [corners[0], corners[3], corners[2], corners[1]];
             }
             
-            // Height = always positive (extrude UP from base)
-            const d = newPoints[3];
-            const a = newPoints[0];
-            const height = Math.abs(d.y - a.y) || 0.5;
+            // Height = ALWAYS UP from the lowest point of the base
+            const baseY = Math.min(...corners.map(c => c.y));
+            const tapY = newPoints[3].y;
+            const height = Math.max(Math.abs(tapY - baseY), 0.1);
+            
+            // Snap corners to baseY (flat on floor)
+            const flatCorners = corners.map(p => ({ x: p.x, y: baseY, z: p.z }));
 
-            // Use extrudeSketchShape — CCW corners + positive height = up with outward normals
             await rulerRef.current?.extrudeSketchShape?.(
-              corners.map(p => ({ x: p.x, y: p.y, z: p.z })),
+              flatCorners.map(p => ({ x: p.x, y: p.y, z: p.z })),
               height,
               `Box_${shapes.length}`
             );
             const shape = {
-              type: 'box', points: corners,
+              type: 'box', points: flatCorners,
               height,
             };
             setShapes(prev => [...prev, shape]);
@@ -658,27 +655,32 @@ export default function ARSketchScreen({ navigation }: any) {
           break;
         }
 
-        // ═══ CYLINDER: 3 taps (center + radius + height) ═══
+        // ═══ CYLINDER: 3 taps (center on floor + pull radius + pull height UP) ═══
         case 'cylinder': {
           if (newStep === 2) {
-            // Radius defined, wait for height
+            // Radius defined on floor, wait for height pull
             setDrawState({ step: newStep, points: newPoints, toolType: activeTool, plane });
+            updatePreview(activeTool, newPoints);
             return;
           }
           if (newStep >= 3) {
+            const center = newPoints[0];
+            // Radius from horizontal distance (XZ plane)
             const radius = Math.sqrt(
-              (newPoints[1].x - newPoints[0].x) ** 2 + (newPoints[1].z - newPoints[0].z) ** 2
+              (newPoints[1].x - center.x) ** 2 + (newPoints[1].z - center.z) ** 2
             ) || 0.25;
-            const height = Math.abs(newPoints[2].y - newPoints[0].y) || 0.5;
+            // Height = how high the 3rd tap is above floor
+            const height = Math.max(Math.abs(newPoints[2].y - center.y), 0.1);
+            // Position: center at floor + half height (SceneKit centers primitives)
             await rulerRef.current?.addPrimitiveAt?.(
               'cylinder',
-              { x: newPoints[0].x, y: newPoints[0].y + height / 2, z: newPoints[0].z },
+              { x: center.x, y: center.y + height / 2, z: center.z },
               { radius, height },
               `Cylinder_${shapes.length}`
             );
             const shape = {
               type: 'cylinder', points: newPoints, radius, height,
-              position: { x: newPoints[0].x, y: newPoints[0].y + height / 2, z: newPoints[0].z },
+              position: { x: center.x, y: center.y + height / 2, z: center.z },
             };
             setShapes(prev => [...prev, shape]);
             saveShapeToDb(shape);
@@ -688,26 +690,28 @@ export default function ARSketchScreen({ navigation }: any) {
           break;
         }
 
-        // ═══ CONE: 3 taps (center + radius + height) ═══
+        // ═══ CONE: 3 taps (center on floor + pull radius + pull height UP) ═══
         case 'cone': {
           if (newStep === 2) {
             setDrawState({ step: newStep, points: newPoints, toolType: activeTool, plane });
+            updatePreview(activeTool, newPoints);
             return;
           }
           if (newStep >= 3) {
+            const center = newPoints[0];
             const radius = Math.sqrt(
-              (newPoints[1].x - newPoints[0].x) ** 2 + (newPoints[1].z - newPoints[0].z) ** 2
+              (newPoints[1].x - center.x) ** 2 + (newPoints[1].z - center.z) ** 2
             ) || 0.25;
-            const height = Math.abs(newPoints[2].y - newPoints[0].y) || 0.5;
+            const height = Math.max(Math.abs(newPoints[2].y - center.y), 0.1);
             await rulerRef.current?.addPrimitiveAt?.(
               'cone',
-              { x: newPoints[0].x, y: newPoints[0].y + height / 2, z: newPoints[0].z },
+              { x: center.x, y: center.y + height / 2, z: center.z },
               { radius, height },
               `Cone_${shapes.length}`
             );
             const shape = {
               type: 'cone', points: newPoints, radius, height,
-              position: { x: newPoints[0].x, y: newPoints[0].y + height / 2, z: newPoints[0].z },
+              position: { x: center.x, y: center.y + height / 2, z: center.z },
             };
             setShapes(prev => [...prev, shape]);
             saveShapeToDb(shape);
@@ -717,26 +721,32 @@ export default function ARSketchScreen({ navigation }: any) {
           break;
         }
 
-        // ═══ PYRAMID: 3 taps (2 base corners + height) ═══
+        // ═══ PYRAMID: 3 taps (2 base corners + height UP) ═══
         case 'pyramid': {
           if (newStep === 2) {
             setDrawState({ step: newStep, points: newPoints, toolType: activeTool, plane });
+            updatePreview(activeTool, newPoints);
             return;
           }
           if (newStep >= 3) {
             const baseA = newPoints[0];
             const baseB = newPoints[1];
-            const height = Math.abs(newPoints[2].y - baseA.y) || 0.5;
-            const radius = Math.sqrt((baseB.x - baseA.x) ** 2 + (baseB.z - baseA.z) ** 2) / 2 || 0.25;
+            const baseY = Math.min(baseA.y, baseB.y);
+            const height = Math.max(Math.abs(newPoints[2].y - baseY), 0.1);
+            // Use extrudeSketchShape with a square base for proper pyramid
+            const cx = (baseA.x + baseB.x) / 2;
+            const cz = (baseA.z + baseB.z) / 2;
+            const halfW = Math.sqrt((baseB.x - baseA.x) ** 2 + (baseB.z - baseA.z) ** 2) / 2 || 0.25;
+            // For now use cone as approximation (round base)
             await rulerRef.current?.addPrimitiveAt?.(
               'cone',
-              { x: (baseA.x + baseB.x) / 2, y: baseA.y + height / 2, z: (baseA.z + baseB.z) / 2 },
-              { radius, height },
+              { x: cx, y: baseY + height / 2, z: cz },
+              { radius: halfW, height },
               `Pyramid_${shapes.length}`
             );
             const shape = {
               type: 'pyramid', points: newPoints, height,
-              position: { x: (baseA.x + baseB.x) / 2, y: baseA.y + height / 2, z: (baseA.z + baseB.z) / 2 },
+              position: { x: cx, y: baseY + height / 2, z: cz },
             };
             setShapes(prev => [...prev, shape]);
             saveShapeToDb(shape);

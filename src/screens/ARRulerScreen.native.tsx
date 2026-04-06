@@ -1278,10 +1278,16 @@ export default function ARRulerScreen({ navigation }: any) {
             // Check if mesh size warrants a stream
             const stats = await rulerRef.current?.getMemoryStats?.();
             const meshMB = stats?.meshSizeMB || 0;
-            addLogMesh(`📊 Mesh: ${meshMB.toFixed(1)}MB, ${stats?.meshAnchorCount || 0} anchors, ${stats?.uploadedAnchorCount || 0} uploaded`);
+            const ramMB = stats?.availableMemoryMB || 9999;
+            const uploaded = stats?.uploadedAnchorCount || 0;
+            const total = stats?.meshAnchorCount || 0;
+            const newAnchors = total - uploaded;
+            addLogMesh(`📊 Mesh: ${meshMB.toFixed(1)}MB (${newAnchors} new/${total} total), RAM: ${Math.round(ramMB)}MB`);
             
-            if (meshMB > 5) { // only stream if more than 5MB of new mesh
-              addLogMesh(`⬆️ Streaming mesh (${meshMB.toFixed(1)}MB)...`);
+            // Stream if: mesh > 2MB OR RAM getting low (< 500MB)
+            const shouldStream = (meshMB > 2 && newAnchors > 0) || (ramMB < 500 && newAnchors > 0);
+            if (shouldStream) {
+              addLogMesh(`⬆️ Streaming mesh (${meshMB.toFixed(1)}MB, ${newAnchors} new anchors)${ramMB < 500 ? ' ⚠️ LOW RAM!' : ''}...`);
               setIsUploadingMesh(true);
               const chunks = await rulerRef.current?.exportMeshChunks(chunkSizeMB);
               if (chunks && chunks.length > 0 && !chunks[0].error) {
@@ -1306,7 +1312,9 @@ export default function ARRulerScreen({ navigation }: any) {
                 // Mark anchors as uploaded & clear SceneKit nodes to free RAM
                 await rulerRef.current?.markAnchorsUploaded?.();
                 const cleared = await rulerRef.current?.clearUploadedMeshNodes?.() || 0;
-                addLogMesh(`🧹 Cleared ${cleared} mesh nodes from GPU RAM`);
+                addLogMesh(`🧹 Cleared ${cleared} mesh nodes — freed ~${(cleared * 0.5).toFixed(0)}MB GPU RAM`);
+              } else {
+                addLogMesh(`ℹ️ No new data to stream: ${chunks?.[0]?.error || 'none'}`);
               }
               setIsUploadingMesh(false);
             }

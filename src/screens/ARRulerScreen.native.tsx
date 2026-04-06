@@ -73,6 +73,7 @@ export default function ARRulerScreen({ navigation }: any) {
   const [isUploadingMesh, setIsUploadingMesh] = useState(false);
   const [finalizationStep, setFinalizationStep] = useState('');
   const [finalizationProgress, setFinalizationProgress] = useState(0); // 0-100
+  const meshStreamBatchRef = useRef(0); // incremental: each stream gets unique names
 
   // Debug & Sync Controls
   const [chunkSizeMB, setChunkSizeMB] = useState(45); // 45MB Supabase limit
@@ -998,11 +999,8 @@ export default function ARRulerScreen({ navigation }: any) {
               setMeshChunksUploaded(i + 1);
               addLogMesh(`✅ Chunk ${i+1} uploaded`);
             }
-            // Clean up live chunks
-            for (let i = 0; i < 20; i++) {
-              const liveFileName = `${userId}/${projectData!.id}_live_chunk_${i}.obj`;
-              await supabase.storage.from('mesh-scans').remove([liveFileName]).catch(() => { });
-            }
+            // Reset stream batch counter for next scan session
+            meshStreamBatchRef.current = 0;
             const { data: urlData } = supabase.storage.from('mesh-scans').getPublicUrl(`${userId}/${projectData!.id}_chunk_0.obj`);
             await supabase.from('ar_projects').update({
               mesh_url: urlData?.publicUrl || "",
@@ -1014,10 +1012,10 @@ export default function ARRulerScreen({ navigation }: any) {
             setIsUploadingMesh(false);
             meshSaved = true;
           } else if (chunks?.[0]?.error?.includes('already uploaded')) {
-            // All anchors were already streamed during live scanning — mesh is already in storage!
-            addLogB(`✅ All mesh data was already streamed during scan — using live chunks`);
-            // Update project with live chunk URL  
-            const { data: urlData } = supabase.storage.from('mesh-scans').getPublicUrl(`${userId}/${projectData!.id}_live_chunk_0.obj`);
+            // All anchors were already streamed during live scanning — mesh is in storage as stream batches
+            addLogB(`✅ All mesh data was already streamed in ${meshStreamBatchRef.current} batches — no new export needed`);
+            // Point project to first stream batch as the mesh URL
+            const { data: urlData } = supabase.storage.from('mesh-scans').getPublicUrl(`${userId}/${projectData!.id}_stream_b0_0.obj`);
             await supabase.from('ar_projects').update({
               mesh_url: urlData?.publicUrl || "",
             }).eq('id', projectData!.id);
@@ -1297,7 +1295,8 @@ export default function ARRulerScreen({ navigation }: any) {
                 let totalBytes = 0;
                 for (let i = 0; i < chunks.length; i++) {
                   const chunk = chunks[i];
-                  const fileName = `${userId}/${projectData.id}_live_chunk_${i}.obj`;
+                  const batchId = meshStreamBatchRef.current;
+                  const fileName = `${userId}/${projectData.id}_stream_b${batchId}_${i}.obj`;
                   const objBytes = encoder.encode(chunk.obj);
                   totalBytes += objBytes.length;
                   addLogMesh(`⬆️ Chunk ${i+1}/${chunks.length}: ${chunk.vertexCount}v ${(objBytes.length/1024/1024).toFixed(1)}MB`);
@@ -1307,7 +1306,8 @@ export default function ARRulerScreen({ navigation }: any) {
                   });
                   setMeshChunksUploaded(i + 1);
                 }
-                addLogMesh(`✅ ${chunks.length} chunks streamed (${(totalBytes/1024/1024).toFixed(1)}MB)`);
+                addLogMesh(`✅ Batch ${meshStreamBatchRef.current}: ${chunks.length} chunks streamed (${(totalBytes/1024/1024).toFixed(1)}MB)`);
+                meshStreamBatchRef.current += 1;
                 
                 // Mark anchors as uploaded & clear SceneKit nodes to free RAM
                 await rulerRef.current?.markAnchorsUploaded?.();

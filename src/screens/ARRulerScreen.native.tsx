@@ -64,6 +64,15 @@ export default function ARRulerScreen({ navigation }: any) {
   const [uploadedCount, setUploadedCount] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
   const [webOperatorOnline, setWebOperatorOnline] = useState(false);
+  // Upload Progress
+  const [photosTaken, setPhotosTaken] = useState(0);
+  const [photosUploaded, setPhotosUploaded] = useState(0);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [meshChunksTotal, setMeshChunksTotal] = useState(0);
+  const [meshChunksUploaded, setMeshChunksUploaded] = useState(0);
+  const [isUploadingMesh, setIsUploadingMesh] = useState(false);
+  const [finalizationStep, setFinalizationStep] = useState('');
+  const [finalizationProgress, setFinalizationProgress] = useState(0); // 0-100
 
   // Debug & Sync Controls
   const [chunkSizeMB, setChunkSizeMB] = useState(45); // 45MB Supabase limit
@@ -958,12 +967,17 @@ export default function ARRulerScreen({ navigation }: any) {
       // 1. Export mesh FIRST (before session reset wipes reconstruction data)
       let meshSaved = false;
       if (meshExportEnabled) {
+        setFinalizationStep('Exporting mesh...');
+        setFinalizationProgress(10);
         addLogB('📦 Exporting mesh BEFORE stop...');
         setPrompt('⏳ Capturing mesh...');
         try {
           const chunks = await rulerRef.current?.exportMeshChunks(chunkSizeMB);
           addLogB(`📦 exportMeshChunks returned: ${chunks?.length ?? 'null'} chunks`);
           if (chunks && chunks.length > 0 && !chunks[0].error) {
+            setIsUploadingMesh(true);
+            setMeshChunksTotal(chunks.length);
+            setMeshChunksUploaded(0);
             let totalV = 0, totalF = 0, totalBytes = 0;
             const encoder = new TextEncoder();
             for (let i = 0; i < chunks.length; i++) {
@@ -973,10 +987,15 @@ export default function ARRulerScreen({ navigation }: any) {
               totalBytes += chunk.byteSize;
               const fileName = `${userId}/${projectData!.id}_chunk_${i}.obj`;
               const objBytes = encoder.encode(chunk.obj);
+              setFinalizationStep(`Uploading mesh ${i+1}/${chunks.length}...`);
+              setFinalizationProgress(10 + (i / chunks.length) * 30);
+              addLogMesh(`⬆️ Chunk ${i+1}/${chunks.length}: ${chunk.vertexCount}v ${(chunk.byteSize/1024/1024).toFixed(1)}MB`);
               await supabase.storage.from('mesh-scans').upload(fileName, objBytes, {
                 contentType: 'text/plain',
                 upsert: true,
               });
+              setMeshChunksUploaded(i + 1);
+              addLogMesh(`✅ Chunk ${i+1} uploaded`);
             }
             for (let i = 0; i < 20; i++) {
               const liveFileName = `${userId}/${projectData!.id}_live_chunk_${i}.obj`;
@@ -989,13 +1008,15 @@ export default function ARRulerScreen({ navigation }: any) {
               mesh_faces_count: totalF,
               mesh_file_size: totalBytes,
             }).eq('id', projectData!.id);
-            addLogB(`✅ Mesh saved: ${totalV}v ${totalF}f ${chunks.length} chunks`);
+            addLogB(`✅ Mesh saved: ${totalV}v ${totalF}f ${chunks.length} chunks (${(totalBytes/1024/1024).toFixed(1)}MB)`);
+            setIsUploadingMesh(false);
             meshSaved = true;
           } else {
             addLogB(`⚠️ No mesh data: ${chunks?.[0]?.error || 'empty'}`);
           }
         } catch (meshErr: any) {
           addLogB(`❌ Mesh export error: ${meshErr.message}`);
+          setIsUploadingMesh(false);
         }
       } else {
         addLogB('📦 Mesh export DISABLED — skipped');
@@ -1022,15 +1043,22 @@ export default function ARRulerScreen({ navigation }: any) {
       // ===== NOW STOP SCAN (this resets the AR session) =====
 
       // 3. Stop RoomCaptureSession (triggers RoomBuilder finalization)
+      setFinalizationStep('Stopping scan...');
+      setFinalizationProgress(50);
       addLogB('🛑 Stopping RoomCaptureSession...');
       await rulerRef.current?.stopRoomScan();
 
       // 4. Wait for RoomBuilder ML finalization
+      setFinalizationStep('ML finalization...');
+      setFinalizationProgress(60);
       addLogB('🧠 RoomBuilder ML finalization in progress...');
       await new Promise(r => setTimeout(r, 4000));
 
       // 5. Send FINALIZED RoomPlan data (session-specific — accumulates across scans)
+      setFinalizationStep('Saving RoomPlan...');
+      setFinalizationProgress(70);
       const scanSessionId = `session_${Date.now()}`;
+      addLogB('🏠 Exporting RoomPlan data...');
       const roomData = await rulerRef.current?.exportRoomPlanData();
       if (roomData && (roomData.wallCount > 0 || roomData.doorCount > 0 || roomData.windowCount > 0 || roomData.objectCount > 0)) {
         await supabase.from('ar_roomplan').upsert({
@@ -1056,8 +1084,11 @@ export default function ARRulerScreen({ navigation }: any) {
       }
 
       // 3b. Per-element upsert (UUID-based, persistent)
+      setFinalizationStep('Saving elements...');
+      setFinalizationProgress(80);
       const sessionId = `session_${Date.now()}`;
       try {
+        addLogB('📋 Exporting RoomPlan elements...');
         const elements = await rulerRef.current?.exportRoomPlanElements();
         if (elements && elements.length > 0) {
           const payload = elements.map((el: any) => ({
@@ -1081,6 +1112,8 @@ export default function ARRulerScreen({ navigation }: any) {
 
       // 6. Upload auto-captured photos
       try {
+        setFinalizationStep('Uploading auto-photos...');
+        setFinalizationProgress(90);
         const autoPhotos = await rulerRef.current?.exportAutoPhotos();
         if (autoPhotos && autoPhotos.length > 0) {
           addLogB(`📸 Uploading ${autoPhotos.length} auto-photos...`);
@@ -1131,7 +1164,10 @@ export default function ARRulerScreen({ navigation }: any) {
         addLogB(`⚠️ Auto-photos: ${autoErr.message}`);
       }
 
+      setFinalizationStep('');
+      setFinalizationProgress(100);
       setIsRoomFinalizing(false);
+      addLogB(`🎉 Scan finalization complete!`);
       setPrompt(`✅ Room scan complete! ${meshSaved ? 'Mesh + ' : ''}RoomPlan finalized.`);
     } catch (e: any) {
       setIsRoomFinalizing(false);
@@ -1444,11 +1480,15 @@ export default function ARRulerScreen({ navigation }: any) {
       return;
     }
     try {
+      setIsUploadingPhoto(true);
+      setPhotosTaken(prev => prev + 1);
+      addLog(`📷 Taking photo #${photosTaken + 1}...`);
       setPrompt("Capturing photo...");
       const result = await rulerRef.current?.takePhoto();
       if (!result || !result.uri || !result.transform) {
         throw new Error("No photo captured");
       }
+      addLog(`📷 Photo captured, reading file...`);
 
       const fileName = `${userId}/${projectData.id}_${Date.now()}.jpg`;
 
@@ -1457,6 +1497,7 @@ export default function ARRulerScreen({ navigation }: any) {
         encoding: FileSystem.EncodingType.Base64,
       });
       const byteArray = Uint8Array.from(atob(photoBase64), c => c.charCodeAt(0));
+      addLog(`📷 Photo size: ${(byteArray.length / 1024).toFixed(0)}KB, uploading...`);
 
       const { error: uploadErr } = await supabase.storage
         .from('ar-photos')
@@ -1465,6 +1506,7 @@ export default function ARRulerScreen({ navigation }: any) {
           upsert: false,
         });
       if (uploadErr) throw uploadErr;
+      addLog(`📷 Photo uploaded to storage ✓`);
 
       const { data: publicUrlData } = supabase.storage.from('ar-photos').getPublicUrl(fileName);
 
@@ -1477,12 +1519,16 @@ export default function ARRulerScreen({ navigation }: any) {
         public_url: publicUrlData.publicUrl,
         transform: result.transform
       });
-
+      setPhotosUploaded(prev => prev + 1);
+      addLog(`📷 Photo #${photosUploaded + 1} saved to DB ✅`);
       setPrompt("📷 Photo saved to map!");
     } catch (e: any) {
       console.log("Photo error:", e);
+      addLog(`📷 ❌ Photo error: ${e.message}`);
       Alert.alert("Photo Error", e.message || "Failed to capture photo");
       setPrompt("Photo capture failed.");
+    } finally {
+      setIsUploadingPhoto(false);
     }
   };
 
@@ -1683,17 +1729,65 @@ export default function ARRulerScreen({ navigation }: any) {
         </View>
       </View>
 
+      {/* ═══ UPLOAD PROGRESS ROWS ═══ */}
+      <View style={{ position: 'absolute', right: 12, top: insets.top + 62, left: 12, zIndex: 99 }}>
+        {/* Photo upload row */}
+        {photosTaken > 0 && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 3, gap: 4 }}>
+            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: isUploadingPhoto ? '#FF69B4' : '#E040FB', shadowColor: '#E040FB', shadowOpacity: isUploadingPhoto ? 0.8 : 0.3, shadowRadius: 4 }} />
+            <Text style={{ color: '#E040FB', fontSize: 7, fontFamily: 'monospace', width: 60 }}>
+              📷 {photosUploaded}/{photosTaken}
+            </Text>
+            <View style={{ flex: 1, height: 3, backgroundColor: 'rgba(224,64,251,0.15)', borderRadius: 2 }}>
+              <View style={{ width: `${photosTaken > 0 ? (photosUploaded / photosTaken) * 100 : 0}%`, height: 3, backgroundColor: '#E040FB', borderRadius: 2 }} />
+            </View>
+            {isUploadingPhoto && <Text style={{ color: '#FF69B4', fontSize: 7, fontFamily: 'monospace' }}>⬆</Text>}
+          </View>
+        )}
 
+        {/* Mesh upload row */}
+        {(isUploadingMesh || meshChunksTotal > 0) && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 3, gap: 4 }}>
+            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: isUploadingMesh ? '#FF9800' : '#4CAF50', shadowColor: isUploadingMesh ? '#FF9800' : '#4CAF50', shadowOpacity: 0.6, shadowRadius: 4 }} />
+            <Text style={{ color: '#FF9800', fontSize: 7, fontFamily: 'monospace', width: 60 }}>
+              📐 {meshChunksUploaded}/{meshChunksTotal}
+            </Text>
+            <View style={{ flex: 1, height: 3, backgroundColor: 'rgba(255,152,0,0.15)', borderRadius: 2 }}>
+              <View style={{ width: `${meshChunksTotal > 0 ? (meshChunksUploaded / meshChunksTotal) * 100 : 0}%`, height: 3, backgroundColor: meshChunksUploaded === meshChunksTotal ? '#4CAF50' : '#FF9800', borderRadius: 2 }} />
+            </View>
+            {isUploadingMesh && <Text style={{ color: '#FF9800', fontSize: 7, fontFamily: 'monospace' }}>⬆</Text>}
+          </View>
+        )}
+
+        {/* Finalization progress row */}
+        {isRoomFinalizing && finalizationStep !== '' && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 3, gap: 4 }}>
+            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#FFD600', shadowColor: '#FFD600', shadowOpacity: 0.8, shadowRadius: 4 }} />
+            <Text style={{ color: '#FFD600', fontSize: 7, fontFamily: 'monospace', flex: 1 }} numberOfLines={1}>
+              ⚙ {finalizationStep}
+            </Text>
+            <View style={{ width: 60, height: 3, backgroundColor: 'rgba(255,214,0,0.15)', borderRadius: 2 }}>
+              <View style={{ width: `${finalizationProgress}%`, height: 3, backgroundColor: '#FFD600', borderRadius: 2 }} />
+            </View>
+            <Text style={{ color: '#FFD600', fontSize: 7, fontFamily: 'monospace' }}>{Math.round(finalizationProgress)}%</Text>
+          </View>
+        )}
+      </View>
 
       {/* Tool buttons — right side: DELETE ALL + WIRE + ROOM + SCAN */}
       <View style={{ position: 'absolute', right: 12, bottom: insets.bottom + 20, zIndex: 15, gap: 6, alignItems: 'center' }} pointerEvents="box-none">
 
         <TouchableOpacity
-          style={[styles.circleBtn, { borderColor: '#E0E0E0', backgroundColor: '#E0E0E0' }]}
+          style={[styles.circleBtn, { borderColor: isUploadingPhoto ? '#FF69B4' : '#E0E0E0', backgroundColor: isUploadingPhoto ? '#FF69B4' : '#E0E0E0' }]}
           onPress={handleTakePhoto}
           activeOpacity={0.7}
         >
           <Text style={[styles.circleBtnText, { color: '#000', fontSize: 24, marginTop: -4 }]}>📷</Text>
+          {photosTaken > 0 && (
+            <View style={{ position: 'absolute', top: -4, right: -4, backgroundColor: '#E040FB', borderRadius: 8, minWidth: 16, height: 16, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 }}>
+              <Text style={{ color: '#FFF', fontSize: 8, fontWeight: 'bold' }}>{photosTaken}</Text>
+            </View>
+          )}
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -1731,9 +1825,10 @@ export default function ARRulerScreen({ navigation }: any) {
           activeOpacity={0.7}
         >
           {isRoomFinalizing ? (
-            <>
+            <View style={{ alignItems: 'center' }}>
               <ActivityIndicator size="small" color="#000" />
-            </>
+              <Text style={{ color: '#000', fontSize: 6, fontWeight: 'bold', marginTop: 1 }}>{Math.round(finalizationProgress)}%</Text>
+            </View>
           ) : isRoomScanning ? (
             <Text style={[styles.circleBtnText, { color: '#FFF' }]}>STOP</Text>
           ) : (

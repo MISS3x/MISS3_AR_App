@@ -328,19 +328,44 @@ export default function ARSketchScreen({ navigation }: any) {
     return toolDef.steps[stepIdx] || 'Ready';
   };
 
-  // ═══════════════════════════════════
-  // HELPER: Build polygon from points
-  // ═══════════════════════════════════
-
-  // Generate circle points on a plane (Y-up, XZ floor by default)
-  const generateCirclePoints = (center: DrawPoint, radius: number, segments = 32): DrawPoint[] => {
+  // Generate circle points on an arbitrary plane (uses normal for wall/floor/ceiling)
+  const generateCirclePoints = (center: DrawPoint, radius: number, segments = 32, planeNormal?: DrawPlane): DrawPoint[] => {
     const pts: DrawPoint[] = [];
+    
+    // Determine the plane's local U and V tangent vectors
+    let ux: number, uy: number, uz: number;
+    let vx: number, vy: number, vz: number;
+    
+    if (planeNormal && Math.abs(planeNormal.ny) < 0.7) {
+      // Vertical surface (wall) — build local coordinate frame from normal
+      const nx = planeNormal.nx, ny = planeNormal.ny, nz = planeNormal.nz;
+      const nLen = Math.sqrt(nx*nx + ny*ny + nz*nz) || 1;
+      const nnx = nx/nLen, nny = ny/nLen, nnz = nz/nLen;
+      
+      // U axis: cross(normal, worldUp) → horizontal direction along wall
+      ux = nny * 0 - nnz * 0;  // simplified: cross(n, [0,1,0]) = [nz, 0, -nx]
+      ux = nnz; uy = 0; uz = -nnx;
+      const uLen = Math.sqrt(ux*ux + uy*uy + uz*uz) || 1;
+      ux /= uLen; uy /= uLen; uz /= uLen;
+      
+      // V axis: cross(U, normal) → vertical direction on wall (should be ~up)
+      vx = uy * nnz - uz * nny;
+      vy = uz * nnx - ux * nnz;
+      vz = ux * nny - uy * nnx;
+    } else {
+      // Horizontal surface (floor/ceiling) — use XZ plane
+      ux = 1; uy = 0; uz = 0;
+      vx = 0; vy = 0; vz = 1;
+    }
+    
     for (let i = 0; i < segments; i++) {
       const angle = (i / segments) * Math.PI * 2;
+      const cu = Math.cos(angle) * radius;
+      const cv = Math.sin(angle) * radius;
       pts.push({
-        x: center.x + Math.cos(angle) * radius,
-        y: center.y,
-        z: center.z + Math.sin(angle) * radius,
+        x: center.x + ux * cu + vx * cv,
+        y: center.y + uy * cu + vy * cv,
+        z: center.z + uz * cu + vz * cv,
       });
     }
     return pts;
@@ -378,8 +403,33 @@ export default function ARSketchScreen({ navigation }: any) {
     ];
   };
 
-  // For square: force equal sides from point A, using distance to B
-  const generateSquarePoints = (a: DrawPoint, b: DrawPoint): DrawPoint[] => {
+  // For square: plane-aware (uses normal to orient on wall or floor)
+  const generateSquarePoints = (a: DrawPoint, b: DrawPoint, planeNormal?: DrawPlane): DrawPoint[] => {
+    if (planeNormal && Math.abs(planeNormal.ny) < 0.7) {
+      // Wall plane — use 3D vectors
+      const nx = planeNormal.nx, ny = planeNormal.ny, nz = planeNormal.nz;
+      const nLen = Math.sqrt(nx*nx + ny*ny + nz*nz) || 1;
+      const nnx = nx/nLen, nny = ny/nLen, nnz = nz/nLen;
+      
+      // AB direction along wall
+      const abx = b.x - a.x, aby = b.y - a.y, abz = b.z - a.z;
+      const abLen = Math.sqrt(abx*abx + aby*aby + abz*abz) || 0.001;
+      const ux = abx/abLen, uy = aby/abLen, uz = abz/abLen;
+      
+      // Perpendicular on wall: cross(normal, AB)
+      let vx = nny * uz - nnz * uy;
+      let vy = nnz * ux - nnx * uz;
+      let vz = nnx * uy - nny * ux;
+      
+      return [
+        { x: a.x, y: a.y, z: a.z },
+        { x: a.x + ux * abLen, y: a.y + uy * abLen, z: a.z + uz * abLen },
+        { x: a.x + ux * abLen + vx * abLen, y: a.y + uy * abLen + vy * abLen, z: a.z + uz * abLen + vz * abLen },
+        { x: a.x + vx * abLen, y: a.y + vy * abLen, z: a.z + vz * abLen },
+      ];
+    }
+    
+    // Floor plane — original XZ logic
     const dx = b.x - a.x;
     const dz = b.z - a.z;
     const side = Math.max(Math.abs(dx), Math.abs(dz));
@@ -422,7 +472,7 @@ export default function ARSketchScreen({ navigation }: any) {
       const needsNativePoint = activeTool === 'polyline';
       
       // Multi-step tools that need plane constraint after first tap
-      const multiStepTools = ['rect', 'square', 'circle', 'ellipse', 'box', 'cylinder', 'cone', 'pyramid'];
+      const multiStepTools = ['line', 'rect', 'square', 'circle', 'ellipse', 'box', 'cylinder', 'cone', 'pyramid'];
       const isMultiStep = multiStepTools.includes(activeTool);
       
       let point: DrawPoint;
@@ -525,7 +575,7 @@ export default function ARSketchScreen({ navigation }: any) {
         // ═══ SQUARE: 2 taps → force 1:1 ratio ═══
         case 'square': {
           if (newStep >= 2) {
-            const sqPts = generateSquarePoints(newPoints[0], newPoints[1]);
+            const sqPts = generateSquarePoints(newPoints[0], newPoints[1], plane);
             await buildPolygonShape(sqPts, `Square_${shapes.length}`);
             const shape = { type: 'square', points: sqPts, closed: true };
             setShapes(prev => [...prev, shape]);
@@ -539,10 +589,11 @@ export default function ARSketchScreen({ navigation }: any) {
         // ═══ CIRCLE: 2 taps (center + radius) → generate polygon ═══
         case 'circle': {
           if (newStep >= 2) {
+            // 3D distance for radius (works on walls too)
             const radius = Math.sqrt(
-              (point.x - newPoints[0].x) ** 2 + (point.z - newPoints[0].z) ** 2
+              (point.x - newPoints[0].x) ** 2 + (point.y - newPoints[0].y) ** 2 + (point.z - newPoints[0].z) ** 2
             );
-            const circlePts = generateCirclePoints(newPoints[0], radius || 0.1, 32);
+            const circlePts = generateCirclePoints(newPoints[0], radius || 0.1, 32, plane);
             await buildPolygonShape(circlePts, `Circle_${shapes.length}`);
             const shape = { type: 'circle', points: circlePts, closed: true, radius };
             setShapes(prev => [...prev, shape]);
@@ -553,24 +604,43 @@ export default function ARSketchScreen({ navigation }: any) {
           break;
         }
 
-        // ═══ ELLIPSE: 3 taps (center + X radius + Y radius) ═══
+        // ═══ ELLIPSE: 3 taps (center + U radius + V radius) ═══
         case 'ellipse': {
           if (newStep >= 3) {
+            // 3D distances for radii
             const rx = Math.sqrt(
-              (newPoints[1].x - newPoints[0].x) ** 2 + (newPoints[1].z - newPoints[0].z) ** 2
+              (newPoints[1].x - newPoints[0].x) ** 2 + (newPoints[1].y - newPoints[0].y) ** 2 + (newPoints[1].z - newPoints[0].z) ** 2
             ) || 0.1;
             const ry = Math.sqrt(
-              (point.x - newPoints[0].x) ** 2 + (point.z - newPoints[0].z) ** 2
+              (point.x - newPoints[0].x) ** 2 + (point.y - newPoints[0].y) ** 2 + (point.z - newPoints[0].z) ** 2
             ) || 0.1;
             const center = newPoints[0];
             const segments = 32;
             const ellipsePts: DrawPoint[] = [];
+            
+            // Determine U/V axes from plane
+            let ux = 1, uy = 0, uz = 0;
+            let vx = 0, vy = 0, vz = 1;
+            if (plane && Math.abs(plane.ny) < 0.7) {
+              // Wall plane
+              const nLen = Math.sqrt(plane.nx**2 + plane.ny**2 + plane.nz**2) || 1;
+              const nnx = plane.nx/nLen, nny = plane.ny/nLen, nnz = plane.nz/nLen;
+              ux = nnz; uy = 0; uz = -nnx;
+              const uLen = Math.sqrt(ux*ux + uz*uz) || 1;
+              ux /= uLen; uz /= uLen;
+              vx = uy * nnz - uz * nny;
+              vy = uz * nnx - ux * nnz;
+              vz = ux * nny - uy * nnx;
+            }
+            
             for (let i = 0; i < segments; i++) {
               const angle = (i / segments) * Math.PI * 2;
+              const cu = Math.cos(angle) * rx;
+              const cv = Math.sin(angle) * ry;
               ellipsePts.push({
-                x: center.x + Math.cos(angle) * rx,
-                y: center.y,
-                z: center.z + Math.sin(angle) * ry,
+                x: center.x + ux * cu + vx * cv,
+                y: center.y + uy * cu + vy * cv,
+                z: center.z + uz * cu + vz * cv,
               });
             }
             await buildPolygonShape(ellipsePts, `Ellipse_${shapes.length}`);

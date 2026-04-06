@@ -75,6 +75,12 @@ export default function ARRulerScreen({ navigation }: any) {
   const [finalizationProgress, setFinalizationProgress] = useState(0); // 0-100
   const meshStreamBatchRef = useRef(0); // incremental: each stream gets unique names
 
+  // Auto-computed room measurements from RoomPlan
+  const [roomStats, setRoomStats] = useState<{
+    floorAreaM2: number; perimeterM: number; ceilingHeightM: number;
+    wallCount: number; doorCount: number; windowCount: number; floorCount: number;
+  } | null>(null);
+
   // Debug & Sync Controls
   const [chunkSizeMB, setChunkSizeMB] = useState(45); // 45MB Supabase limit
   const [showDebugPanel, setShowDebugPanel] = useState(true);
@@ -879,11 +885,35 @@ export default function ARRulerScreen({ navigation }: any) {
         }
       }
 
+      // Ask about photo quality BEFORE auto-photo
+      const selectedQuality = await new Promise<string>((resolve) => {
+        Alert.alert(
+          '📷 Kvalita fotek',
+          'Vyber rozlišení pro sken:',
+          [
+            {
+              text: '🟢 Eco (960×720, ~150KB)',
+              onPress: () => resolve('low'),
+            },
+            {
+              text: '🟡 Standard (1920×1440, ~500KB)',
+              onPress: () => resolve('medium'),
+            },
+            {
+              text: '🔴 Pro (1920×1440, ~1.2MB)',
+              onPress: () => resolve('high'),
+            },
+          ],
+        );
+      });
+      await rulerRef.current?.setPhotoQuality?.(selectedQuality);
+      addLogB(`📷 Photo quality: ${selectedQuality}`);
+
       // Ask about auto-photo BEFORE starting scan
       await new Promise<void>((resolve) => {
         Alert.alert(
           '📸 Automatické fotky',
-          'Pořizovat fotky automaticky po 1 metru?\nFotky budou viditelné jako růžové body.',
+          `Pořizovat fotky automaticky po 1 metru?\nKvalita: ${selectedQuality.toUpperCase()}\nFotky budou viditelné jako růžové body.`,
           [
             {
               text: 'Ne',
@@ -1246,6 +1276,20 @@ export default function ARRulerScreen({ navigation }: any) {
               updated_at: new Date().toISOString(),
             }, { onConflict: 'id' });
             addLogB(`✅ RoomPlan: ${roomData.wallCount}W ${roomData.doorCount}D ${roomData.windowCount}Wi ${roomData.objectCount}O`);
+            
+            // Update live room stats for UI display
+            if (roomData.floorAreaM2 || roomData.perimeterM) {
+              setRoomStats({
+                floorAreaM2: roomData.floorAreaM2 || 0,
+                perimeterM: roomData.perimeterM || 0,
+                ceilingHeightM: roomData.ceilingHeightM || 0,
+                wallCount: roomData.wallCount || 0,
+                doorCount: roomData.doorCount || 0,
+                windowCount: roomData.windowCount || 0,
+                floorCount: roomData.floorCount || 0,
+              });
+              addLogB(`📐 Area: ${(roomData.floorAreaM2 || 0).toFixed(1)}m² | Perimeter: ${(roomData.perimeterM || 0).toFixed(1)}m | H: ${(roomData.ceilingHeightM || 0).toFixed(2)}m`);
+            }
           }
 
           // 2b. Per-element upsert (UUID-based merge — old elements stay, new ones added)
@@ -1659,6 +1703,59 @@ export default function ARRulerScreen({ navigation }: any) {
                 : memoryStats.availableMemoryMB < 400 ? '⚡ HIGH LOAD' 
                 : `● ${memoryStats.meshAnchorCount} anchors${(memoryStats as any).uploadedAnchorCount > 0 ? ` (${(memoryStats as any).uploadedAnchorCount}⬆)` : ''}`}
             </Text>
+          </View>
+        </View>
+      )}
+
+      {/* ═══ ROOM STATS HUD — Auto-computed measurements ═══ */}
+      {roomStats && (isRoomScanning || isRoomFinalizing) && (
+        <View style={{
+          position: 'absolute', top: 46, left: 8, width: 140,
+          backgroundColor: 'rgba(10,10,30,0.85)', borderRadius: 10,
+          borderWidth: 1, borderColor: 'rgba(0,200,255,0.3)',
+          padding: 8, gap: 4,
+        }}>
+          {/* Area */}
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+            <Text style={{ color: 'rgba(0,200,255,0.6)', fontSize: 8, fontWeight: 'bold' }}>📐 AREA</Text>
+            <Text style={{ color: '#00C8FF', fontSize: 10, fontWeight: 'bold' }}>
+              {roomStats.floorAreaM2.toFixed(1)} m²
+            </Text>
+          </View>
+          {/* Perimeter */}
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+            <Text style={{ color: 'rgba(0,200,255,0.6)', fontSize: 8, fontWeight: 'bold' }}>📏 PERIM</Text>
+            <Text style={{ color: '#FFF', fontSize: 9 }}>
+              {roomStats.perimeterM.toFixed(1)} m
+            </Text>
+          </View>
+          {/* Ceiling Height */}
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+            <Text style={{ color: 'rgba(0,200,255,0.6)', fontSize: 8, fontWeight: 'bold' }}>↕ HEIGHT</Text>
+            <Text style={{ color: '#FFF', fontSize: 9 }}>
+              {roomStats.ceilingHeightM.toFixed(2)} m
+            </Text>
+          </View>
+          {/* Volume (computed) */}
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+            <Text style={{ color: 'rgba(0,200,255,0.6)', fontSize: 8, fontWeight: 'bold' }}>📦 VOL</Text>
+            <Text style={{ color: '#FFF', fontSize: 9 }}>
+              {(roomStats.floorAreaM2 * roomStats.ceilingHeightM).toFixed(1)} m³
+            </Text>
+          </View>
+          {/* Wall area (computed: perimeter × height - doors - windows) */}
+          <View style={{ height: 1, backgroundColor: 'rgba(0,200,255,0.15)', marginVertical: 2 }} />
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+            <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 7 }}>🧱 WALLS</Text>
+            <Text style={{ color: '#FFF', fontSize: 8 }}>{roomStats.wallCount}</Text>
+          </View>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+            <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 7 }}>🚪 DOORS</Text>
+            <Text style={{ color: '#FFF', fontSize: 8 }}>{roomStats.doorCount}</Text>
+          </View>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+            <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 7 }}>🪟 WINDOWS</Text>
+            <Text style={{ color: '#FFF', fontSize: 8 }}>{roomStats.windowCount}</Text>
           </View>
         </View>
       )}

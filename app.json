@@ -41,7 +41,7 @@
     },
     "extra": {
       "eas": {
-        "projectId": "45ad2b41-aaae-48e7-83f1-1683c37a8610"
+        "projectId": "ac4ac6a7-77df-487e-ba6a-3d6d2dea7ab0"
       }
     },
     "plugins": [
@@ -56,6 +56,6 @@
       "./plugins/withSceneReconstruction",
       "expo-asset"
     ],
-    "owner": "janulee_p"
+    "owner": "krtekx"
   }
 }

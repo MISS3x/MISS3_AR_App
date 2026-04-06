@@ -3,7 +3,6 @@ import ARKit
 import SceneKit
 import UIKit
 import Metal
-import os.proc
 
 #if canImport(RoomPlan)
 import RoomPlan

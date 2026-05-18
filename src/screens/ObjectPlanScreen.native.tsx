@@ -193,8 +193,10 @@ const ARNodeComponent = ({ obj, index, setPlacedObjects, arSceneRef, selectedObj
              try {
                 const result = await modelRef.current.getBoundingBoxAsync();
                 if (result && result.boundingBox && typeof result.boundingBox.minY === 'number') {
-                   // Shift by inverted minY to align the exact bottom of the mesh to Y=0
-                   const shift = -result.boundingBox.minY + 0.01; 
+                   let shift = -result.boundingBox.minY + 0.01; 
+                   if (isNaN(shift) || !isFinite(shift)) {
+                     shift = 0;
+                   }
                    console.log(`[Model ${obj.title}] BBox minY=${result.boundingBox.minY.toFixed(3)} → yOffset=${shift.toFixed(3)}`);
                    // Use obj.id (not index!) to find correct object — index may be stale
                    setPlacedObjects((prev: ARPlacedObject[]) => 
@@ -555,12 +557,25 @@ const ARScene = (props: any) => {
 
 const PureJSSlider = ({ value, minimumValue, maximumValue, onValueChange, style, minimumTrackTintColor, maximumTrackTintColor }: any) => {
   const [width, setWidth] = useState(0);
+  const [internalValue, setInternalValue] = useState(value);
+  const lastUpdate = useRef(0);
 
-  const handleMove = (x: number) => {
+  useEffect(() => {
+    setInternalValue(value);
+  }, [value]);
+
+  const handleMove = (x: number, isRelease: boolean = false) => {
     if (width === 0) return;
     const percentage = Math.max(0, Math.min(1, x / width));
     const val = minimumValue + percentage * (maximumValue - minimumValue);
-    onValueChange(val);
+    setInternalValue(val);
+    
+    // Throttle the parent update to avoid bridging crash (max 15fps)
+    const now = Date.now();
+    if (isRelease || now - lastUpdate.current > 66) {
+       onValueChange(val);
+       lastUpdate.current = now;
+    }
   };
 
   return (
@@ -570,11 +585,12 @@ const PureJSSlider = ({ value, minimumValue, maximumValue, onValueChange, style,
       onStartShouldSetResponder={() => true}
       onResponderGrant={(evt) => handleMove(evt.nativeEvent.locationX)}
       onResponderMove={(evt) => handleMove(evt.nativeEvent.locationX)}
+      onResponderRelease={(evt) => handleMove(evt.nativeEvent.locationX, true)}
     >
       <View style={{ height: 4, backgroundColor: maximumTrackTintColor || '#555', borderRadius: 2 }} pointerEvents="none" />
       <View style={{ 
         position: 'absolute', 
-        left: Math.max(0, width * ((value - minimumValue) / (maximumValue - minimumValue)) - 10), 
+        left: Math.max(0, width * ((internalValue - minimumValue) / (maximumValue - minimumValue)) - 10), 
         width: 20, 
         height: 20, 
         borderRadius: 10, 

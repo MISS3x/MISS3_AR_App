@@ -88,6 +88,7 @@ interface CatalogModel {
       scale?: { x: number; y: number; z: number };
       modelOffset?: { x: number; y: number; z: number };
   } | null;
+  updated_at?: string;
 }
 
 
@@ -169,7 +170,7 @@ const ARNodeComponent = ({ obj, index, setPlacedObjects, arSceneRef, selectedObj
       position={obj.position}
       dragType="FixedToPlane"
       dragPlane={{ planePoint: [0, obj.position[1], 0], planeNormal: [0, 1, 0], maxDistance: 20 }}
-      onDrag={handleDrag}
+      onDrag={selectedObjectId === obj.id ? undefined : handleDrag}
       onPinch={onPinch}
       onRotate={onRotate}
       onClick={() => {
@@ -551,7 +552,7 @@ export default function SandboxARScreen({ navigation }: any) {
       setLoadingCatalog(true);
       const { data, error } = await supabase
         .from('models_3d')
-        .select('id, title, thumbnail_path, storage_path, metadata, model_transform')
+        .select('id, title, thumbnail_path, storage_path, metadata, model_transform, updated_at')
         .eq('is_active', true)
         .order('created_at', { ascending: false });
 
@@ -585,7 +586,8 @@ export default function SandboxARScreen({ navigation }: any) {
          throw new Error("Could not generate secure file URL");
       }
 
-      const fileName = model.storage_path.split('/').pop() || 'model.glb';
+      const timestamp = model.updated_at ? new Date(model.updated_at).getTime() : Date.now();
+      const fileName = `${model.id}_${timestamp}.glb`;
       const localUri = `${FileSystem.documentDirectory}${fileName}`;
 
       const fileInfo = await FileSystem.getInfoAsync(localUri);
@@ -693,6 +695,26 @@ export default function SandboxARScreen({ navigation }: any) {
         )}
       </View>
 
+      {/* Right Side Vertical Tools for Selected Object */}
+      {selectedObjectId && selectedObject && (
+        <View style={styles.sideToolbar}>
+          <TouchableOpacity 
+            style={[styles.sideToolButton, selectedObject.scaleLocked !== false ? styles.sideToolActive : null]}
+            onPress={() => {
+              setPlacedObjects(prev => prev.map(o => o.id === selectedObjectId ? {...o, scaleLocked: o.scaleLocked === false ? true : false} : o));
+            }}
+          >
+            <Text style={styles.sideToolIcon}>{selectedObject.scaleLocked !== false ? '🔒' : '🔓'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.sideToolButton, isPointRotateMode ? styles.sideToolActive : null]}
+            onPress={() => setIsPointRotateMode(!isPointRotateMode)}
+          >
+            <Text style={styles.sideToolIcon}>🎯</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* Bottom Action Area */}
       {!isCatalogOpen && (
         <View style={[styles.bottomOverlay, { paddingBottom: insets.bottom + spacing.lg }]}>
@@ -705,26 +727,7 @@ export default function SandboxARScreen({ navigation }: any) {
                  </TouchableOpacity>
                </View>
 
-               <View style={styles.toolRow}>
-                 <TouchableOpacity 
-                   style={[styles.toolButton, selectedObject.scaleLocked !== false ? styles.toolActive : null]}
-                   onPress={() => {
-                      setPlacedObjects(prev => prev.map(o => o.id === selectedObjectId ? {...o, scaleLocked: o.scaleLocked === false ? true : false} : o));
-                   }}
-                 >
-                   <Text style={[styles.toolText, selectedObject.scaleLocked !== false ? styles.toolActiveText : null]}>
-                      {selectedObject.scaleLocked !== false ? '🔒 Scale Locked' : '🔓 Scale Unlocked'}
-                   </Text>
-                 </TouchableOpacity>
-                 <TouchableOpacity 
-                   style={[styles.toolButton, isPointRotateMode ? styles.toolActive : null]}
-                   onPress={() => setIsPointRotateMode(!isPointRotateMode)}
-                 >
-                   <Text style={[styles.toolText, isPointRotateMode ? styles.toolActiveText : null]}>🎯 Point Rotate</Text>
-                 </TouchableOpacity>
-               </View>
-
-               <Text style={{color: '#AAA', marginTop: 15, marginBottom: 5}}>Rotation ({Math.round(selectedObject.rotation[1])}°)</Text>
+               <Text style={{color: '#AAA', marginBottom: 5}}>Rotation ({Math.round(selectedObject.rotation[1])}°)</Text>
                <Slider
                  style={{width: '100%', height: 40}}
                  minimumValue={0}
@@ -736,23 +739,22 @@ export default function SandboxARScreen({ navigation }: any) {
                  minimumTrackTintColor={colors.primary}
                  maximumTrackTintColor="#555"
                />
-               <Text style={[styles.hintText, { marginTop: 10 }]}>
-                 {isPointRotateMode ? "Aim reticle at floor and tap to rotate model" : "Use slider or point rotate tool"}
-               </Text>
+               {isPointRotateMode && (
+                 <Text style={[styles.hintText, { marginTop: 10 }]}>Aim reticle at floor and tap to rotate model</Text>
+               )}
              </View>
           ) : pendingModelContext ? (
-            // Ghost active — CHANGE MODEL + PLACE MODEL / PLACE ANOTHER
+            // Ghost active — CANCEL + PLACE MODEL / PLACE ANOTHER
             <View style={styles.buttonRow}>
-              <TouchableOpacity 
-                style={[styles.secondaryButton]} 
-                onPress={() => {
-                  setPendingModelContext(null);
-                  setGhostPosition(null);
-                  setIsCatalogOpen(true);
-                }}
-              >
-                <Text style={styles.secondaryButtonText}>CHANGE{"\n"}MODEL</Text>
-              </TouchableOpacity>
+               <TouchableOpacity 
+                 style={[styles.secondaryButton]} 
+                 onPress={() => {
+                   setPendingModelContext(null);
+                   setGhostPosition(null);
+                 }}
+               >
+                 <Text style={styles.secondaryButtonText}>CANCEL</Text>
+               </TouchableOpacity>
               
               <Animated.View style={{ opacity: blinkAnim }}>
                 <TouchableOpacity 
@@ -843,6 +845,36 @@ const styles = StyleSheet.create({
   backButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center' },
   backIcon: { fontSize: 20, color: '#FFF' },
   headerTitle: { flex: 1, fontFamily: typography.fontFamily.semiBold, fontSize: typography.fontSize.lg, color: '#FFF' },
+  selectedTitle: {
+    color: '#FFF',
+    fontFamily: typography.fontFamily.semiBold,
+    fontSize: typography.fontSize.md,
+    flex: 1,
+  },
+  sideToolbar: {
+    position: 'absolute',
+    right: spacing.md,
+    top: '40%',
+    gap: spacing.md,
+    zIndex: 20,
+  },
+  sideToolButton: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  sideToolActive: {
+    borderColor: colors.primary,
+    backgroundColor: 'rgba(0, 230, 255, 0.2)',
+  },
+  sideToolIcon: {
+    fontSize: 28,
+  },
   
   ghostIndicator: {
     backgroundColor: 'rgba(0, 230, 255, 0.15)',
@@ -947,4 +979,6 @@ const styles = StyleSheet.create({
   catalogCardTitle: { color: '#FFF', fontFamily: typography.fontFamily.semiBold, fontSize: 14 },
   catalogCardSize: { color: colors.textTertiary, fontFamily: typography.fontFamily.medium, fontSize: 12, marginTop: 4 },
   catalogAddIcon: { width: 34, height: 34, borderRadius: 17, backgroundColor: 'rgba(0,230,255,0.15)', borderWidth: 1, borderColor: 'rgba(0,230,255,0.3)', alignItems: 'center', justifyContent: 'center' },
+  selectedPanel: { backgroundColor: 'rgba(0,0,0,0.85)', borderRadius: borderRadius.lg, padding: spacing.md, width: '100%' },
+  selectedHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.md },
 });

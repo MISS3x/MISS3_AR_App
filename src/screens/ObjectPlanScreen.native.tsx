@@ -90,7 +90,7 @@ interface CatalogModel {
 }
 
 
-const ARNodeComponent = ({ obj, index, setPlacedObjects, arSceneRef, selectedObjectId, setSelectedObjectId, isPointRotateMode, isXRayMode }: { obj: ARPlacedObject, index: number, setPlacedObjects: any, arSceneRef?: any, selectedObjectId?: string | null, setSelectedObjectId?: any, isPointRotateMode?: boolean, isXRayMode?: boolean }) => {
+const ARNodeComponent = ({ obj, index, setPlacedObjects, arSceneRef, selectedObjectId, setSelectedObjectId, activeTransformMode, isXRayMode }: { obj: ARPlacedObject, index: number, setPlacedObjects: any, arSceneRef?: any, selectedObjectId?: string | null, setSelectedObjectId?: any, activeTransformMode?: 'move' | 'rotate' | null, isXRayMode?: boolean }) => {
   const nodeRef = useRef<any>(null);
   const modelRef = useRef<any>(null);
   const currentScale = useRef<[number, number, number]>(obj.scale);
@@ -168,11 +168,11 @@ const ARNodeComponent = ({ obj, index, setPlacedObjects, arSceneRef, selectedObj
       position={obj.position}
       dragType="FixedToPlane"
       dragPlane={{ planePoint: [0, obj.position[1], 0], planeNormal: [0, 1, 0], maxDistance: 20 }}
-      onDrag={selectedObjectId === obj.id ? undefined : handleDrag}
+      onDrag={selectedObjectId === obj.id && activeTransformMode === 'move' ? handleDrag : undefined}
       onPinch={onPinch}
       onRotate={onRotate}
       onClick={() => {
-        if (!isPointRotateMode && setSelectedObjectId) setSelectedObjectId(obj.id);
+        if (setSelectedObjectId) setSelectedObjectId(obj.id);
       }}
     >
       <Viro3DObject
@@ -183,7 +183,7 @@ const ARNodeComponent = ({ obj, index, setPlacedObjects, arSceneRef, selectedObj
           const ext = obj.localUri.split('.').pop()?.toUpperCase() || 'GLB';
           return ext === 'GLTF' ? 'GLTF' : ext === 'OBJ' ? 'OBJ' : ext === 'VRX' ? 'VRX' : 'GLB';
         })()}
-        materials={isXRayMode ? ["xrayMaterial"] : []}
+        materials={isXRayMode ? ["xrayMaterial"] : undefined}
         position={[obj.modelOffset[0], obj.yOffset + obj.modelOffset[1], obj.modelOffset[2]]}
         scale={[1, 1, 1]}
         onLoadEnd={async () => {
@@ -232,7 +232,7 @@ const ARScene = (props: any) => {
      onPlaceGhost,
      crystalUri,
      selectedObjectId, setSelectedObjectId,
-     isPointRotateMode, setIsPointRotateMode,
+     activeTransformMode,
      isXRayMode
   } = props.sceneNavigator.viroAppProps;
   
@@ -303,18 +303,13 @@ const ARScene = (props: any) => {
   };
 
   const handleSceneClick = (position: number[], source: any) => {
-    if (isPointRotateMode && selectedObjectId && position && position.length === 3) {
-      setPlacedObjects((prev: ARPlacedObject[]) => prev.map(o => {
-        if (o.id === selectedObjectId) {
-          const dx = position[0] - o.position[0];
-          const dz = position[2] - o.position[2];
-          const angleRad = Math.atan2(dx, dz);
-          const angleDeg = angleRad * (180 / Math.PI);
-          return { ...o, rotation: [o.rotation[0], angleDeg, o.rotation[2]] };
-        }
-        return o;
-      }));
-    } else if (!isPointRotateMode && selectedObjectId) {
+    if (pendingModelContext && onPlaceGhost) {
+      onPlaceGhost();
+      return;
+    }
+    
+    // We removed isPointRotateMode handling here, as clicking the scene doesn't need to rotate anymore
+    if (selectedObjectId && activeTransformMode !== 'move') {
        setSelectedObjectId(null);
     }
   };
@@ -453,7 +448,7 @@ const ARScene = (props: any) => {
                 const ext = pendingModelContext.localUri.split('.').pop()?.toUpperCase() || 'GLB';
                 return ext === 'GLTF' ? 'GLTF' : ext === 'OBJ' ? 'OBJ' : ext === 'VRX' ? 'VRX' : 'GLB';
               })()}
-              materials={isXRayMode ? ["xrayMaterial"] : []}
+              materials={isXRayMode ? ["xrayMaterial"] : undefined}
               position={[
                 pendingModelContext.model_transform?.modelOffset?.x || 0,
                 pendingModelContext.model_transform?.modelOffset?.y || 0,
@@ -483,32 +478,20 @@ const ARScene = (props: any) => {
         </ViroNode>
       )}
       
-      {/* Placed Objects - Wrapped in a persistent node to prevent Viro reconciliation bugs when ghost unmounts */}
-      <ViroNode position={[0,0,0]}>
-        {placedObjects.map((obj: ARPlacedObject, index: number) => (
-          <ARNodeComponent 
-            key={obj.id} 
-            obj={obj} 
-            index={index} 
-            setPlacedObjects={setPlacedObjects} 
-            arSceneRef={arSceneRef}
-            selectedObjectId={selectedObjectId}
-            setSelectedObjectId={setSelectedObjectId}
-            isPointRotateMode={isPointRotateMode}
-            isXRayMode={isXRayMode}
-          />
-        ))}
-      </ViroNode>
-
-      {/* Point rotate line */}
-      {isPointRotateMode && selectedObjectId && ghostPosition && (
-        <ViroPolyline
-          position={[0,0,0]}
-          points={[placedObjects.find((o: any) => o.id === selectedObjectId)?.position || [0,0,0], ghostPosition]}
-          thickness={0.02}
-          materials={["reticleDotMaterial"]}
+      {/* Placed Objects */}
+      {placedObjects.map((obj: ARPlacedObject, index: number) => (
+        <ARNodeComponent 
+          key={obj.id} 
+          obj={obj} 
+          index={index} 
+          setPlacedObjects={setPlacedObjects} 
+          arSceneRef={arSceneRef}
+          selectedObjectId={selectedObjectId}
+          setSelectedObjectId={setSelectedObjectId}
+          activeTransformMode={activeTransformMode}
+          isXRayMode={isXRayMode}
         />
-      )}
+      ))}
     </ViroARScene>
   );
 };
@@ -554,7 +537,8 @@ export default function SandboxARScreen({ navigation }: any) {
   
   // Selection & UI state
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
-  const [isPointRotateMode, setIsPointRotateMode] = useState(false);
+  const [activeTransformMode, setActiveTransformMode] = useState<'move' | 'rotate' | null>('rotate');
+  const [isObjectListOpen, setIsObjectListOpen] = useState(false);
   const [isXRayMode, setIsXRayMode] = useState(false);
   const selectedObject = placedObjects.find(o => o.id === selectedObjectId);
 
@@ -710,7 +694,7 @@ export default function SandboxARScreen({ navigation }: any) {
            onPlaceGhost: handlePlaceGhost,
            crystalUri,
            selectedObjectId, setSelectedObjectId,
-           isPointRotateMode, setIsPointRotateMode,
+           activeTransformMode,
            isXRayMode
         }}
         style={styles.viroContainer} 
@@ -725,6 +709,9 @@ export default function SandboxARScreen({ navigation }: any) {
           <Text style={styles.backIcon}>←</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>Multi Models Viewer</Text>
+        <TouchableOpacity onPress={() => setIsObjectListOpen(!isObjectListOpen)} style={[styles.backButton, isObjectListOpen && { backgroundColor: 'rgba(0,230,255,0.3)' }]}>
+          <Text style={{ fontSize: 18 }}>👁️</Text>
+        </TouchableOpacity>
         <TouchableOpacity onPress={() => setIsXRayMode(!isXRayMode)} style={[styles.backButton, isXRayMode && { backgroundColor: 'rgba(0,230,255,0.3)' }]}>
           <Text style={{ fontSize: 18 }}>{isXRayMode ? '🩻' : '🧱'}</Text>
         </TouchableOpacity>
@@ -737,51 +724,68 @@ export default function SandboxARScreen({ navigation }: any) {
       )}
 
       {/* Right Side Vertical Tools for Selected Object */}
-      {selectedObjectId && selectedObject && (
+      {selectedObjectId && selectedObject && !isObjectListOpen && (
         <View style={styles.sideToolbar}>
           <TouchableOpacity 
-            style={[styles.sideToolButton, selectedObject.scaleLocked !== false ? styles.sideToolActive : null]}
-            onPress={() => {
-              setPlacedObjects(prev => prev.map(o => o.id === selectedObjectId ? {...o, scaleLocked: o.scaleLocked === false ? true : false} : o));
-            }}
+            style={[styles.sideToolButton, activeTransformMode === 'move' ? styles.sideToolActive : null]}
+            onPress={() => setActiveTransformMode('move')}
           >
-            <Text style={styles.sideToolIcon}>{selectedObject.scaleLocked !== false ? '🔒' : '🔓'}</Text>
+            <Text style={styles.sideToolIcon}>↕️</Text>
           </TouchableOpacity>
           <TouchableOpacity 
-            style={[styles.sideToolButton, isPointRotateMode ? styles.sideToolActive : null]}
-            onPress={() => setIsPointRotateMode(!isPointRotateMode)}
+            style={[styles.sideToolButton, activeTransformMode === 'rotate' ? styles.sideToolActive : null]}
+            onPress={() => setActiveTransformMode('rotate')}
           >
-            <Text style={styles.sideToolIcon}>🎯</Text>
+            <Text style={styles.sideToolIcon}>🔄</Text>
           </TouchableOpacity>
         </View>
       )}
 
       {/* Bottom Action Area */}
-      {!isCatalogOpen && (
+      {!isCatalogOpen && !isObjectListOpen && (
         <View style={[styles.bottomOverlay, { paddingBottom: insets.bottom + spacing.lg }]}>
           {selectedObjectId && selectedObject ? (
              <View style={styles.selectedPanel}>
                <View style={styles.selectedHeader}>
                  <Text style={styles.selectedTitle} numberOfLines={1}>{selectedObject.title}</Text>
-                 <TouchableOpacity onPress={() => { setSelectedObjectId(null); setIsPointRotateMode(false); }}>
+                 <TouchableOpacity onPress={() => { setSelectedObjectId(null); }}>
                    <Text style={{color: '#FFF', fontSize: 20}}>✕</Text>
                  </TouchableOpacity>
                </View>
 
-               <Text style={{color: '#AAA', marginBottom: 15}}>Rotation ({Math.round(selectedObject.rotation[1])}°)</Text>
-               <PureJSSlider
-                 style={{width: '100%', height: 40}}
-                 minimumValue={0}
-                 maximumValue={360}
-                 value={((selectedObject.rotation[1] % 360) + 360) % 360}
-                 onValueChange={(val: number) => {
-                   setPlacedObjects(prev => prev.map(o => o.id === selectedObjectId ? {...o, rotation: [o.rotation[0], val, o.rotation[2]]} : o));
-                 }}
-                 minimumTrackTintColor={colors.primary}
-                 maximumTrackTintColor="#555"
-               />
-               {isPointRotateMode && (
-                 <Text style={[styles.hintText, { marginTop: 10 }]}>Aim reticle at floor and tap to rotate model</Text>
+               {activeTransformMode === 'rotate' && (
+                 <>
+                   <Text style={{color: '#AAA', marginBottom: 15}}>Rotation ({Math.round(selectedObject.rotation[1])}°)</Text>
+                   <PureJSSlider
+                     style={{width: '100%', height: 40}}
+                     minimumValue={0}
+                     maximumValue={360}
+                     value={((selectedObject.rotation[1] % 360) + 360) % 360}
+                     onValueChange={(val: number) => {
+                       setPlacedObjects(prev => prev.map(o => o.id === selectedObjectId ? {...o, rotation: [o.rotation[0], val, o.rotation[2]]} : o));
+                     }}
+                     minimumTrackTintColor={colors.primary}
+                     maximumTrackTintColor="#555"
+                   />
+                 </>
+               )}
+               
+               {activeTransformMode === 'move' && (
+                 <>
+                   <Text style={{color: '#AAA', marginBottom: 15}}>Vertical Offset (Z/Y Axis)</Text>
+                   <PureJSSlider
+                     style={{width: '100%', height: 40}}
+                     minimumValue={-2}
+                     maximumValue={2}
+                     value={selectedObject.yOffset || 0}
+                     onValueChange={(val: number) => {
+                       setPlacedObjects(prev => prev.map(o => o.id === selectedObjectId ? {...o, yOffset: val} : o));
+                     }}
+                     minimumTrackTintColor="#00E6FF"
+                     maximumTrackTintColor="#555"
+                   />
+                   <Text style={[styles.hintText, { marginTop: 10 }]}>Drag the object on screen to move it horizontally</Text>
+                 </>
                )}
              </View>
           ) : pendingModelContext ? (
@@ -822,10 +826,54 @@ export default function SandboxARScreen({ navigation }: any) {
           {/* Instruction hint */}
           {pendingModelContext ? (
             <Text style={styles.hintText}>Move phone to position ghost • Tap PLACE to confirm</Text>
-          ) : hasPlacedAny ? (
-            <Text style={styles.hintText}>Drag to move • Pinch to scale • Twist to rotate</Text>
+          ) : hasPlacedAny && !selectedObjectId ? (
+            <Text style={styles.hintText}>Select an object via the 👁️ menu to edit</Text>
+          ) : hasPlacedAny && selectedObjectId && activeTransformMode === 'move' ? (
+            <Text style={styles.hintText}>Drag to move • Vertical slider for Z</Text>
+          ) : hasPlacedAny && selectedObjectId && activeTransformMode === 'rotate' ? (
+            <Text style={styles.hintText}>Use slider to rotate</Text>
           ) : (
             <Text style={styles.hintText}>Select a 3D model from the catalog to begin</Text>
+          )}
+        </View>
+      )}
+
+      {/* OBJECT SELECTION LIST OVERLAY */}
+      {isObjectListOpen && (
+        <View style={[styles.objectListOverlay, { paddingTop: insets.top + 80 }]}>
+          <Text style={styles.objectListTitle}>Placed Objects</Text>
+          {placedObjects.length === 0 ? (
+            <Text style={styles.hintText}>No objects placed yet</Text>
+          ) : (
+            <FlatList
+              data={placedObjects}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={{ padding: spacing.md, gap: spacing.md }}
+              renderItem={({ item, index }) => {
+                const isSelected = selectedObjectId === item.id;
+                // Generate a vibrant HSL color for the bubble
+                const hue = (index * 137.5) % 360;
+                const bubbleColor = `hsl(${hue}, 80%, 40%)`;
+                return (
+                  <TouchableOpacity 
+                    style={[
+                      styles.objectBubble,
+                      { backgroundColor: bubbleColor },
+                      isSelected && { borderWidth: 3, borderColor: '#FFF' }
+                    ]}
+                    activeOpacity={0.8}
+                    onPress={() => {
+                      setSelectedObjectId(item.id);
+                      setActiveTransformMode('rotate'); // Default to rotate
+                      setIsObjectListOpen(false);
+                    }}
+                  >
+                    <Text style={styles.objectBubbleText} numberOfLines={1}>{item.title}</Text>
+                    {isSelected && <Text style={{ color: '#FFF' }}>✓</Text>}
+                  </TouchableOpacity>
+                );
+              }}
+            />
           )}
         </View>
       )}
@@ -1022,4 +1070,21 @@ const styles = StyleSheet.create({
   catalogAddIcon: { width: 34, height: 34, borderRadius: 17, backgroundColor: 'rgba(0,230,255,0.15)', borderWidth: 1, borderColor: 'rgba(0,230,255,0.3)', alignItems: 'center', justifyContent: 'center' },
   selectedPanel: { backgroundColor: 'rgba(0,0,0,0.85)', borderRadius: borderRadius.lg, padding: spacing.md, width: '100%' },
   selectedHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.md },
+  
+  objectListOverlay: {
+    position: 'absolute', top: 0, bottom: 0, left: 0, right: 0,
+    backgroundColor: 'rgba(0,0,0,0.7)', zIndex: 15,
+  },
+  objectListTitle: {
+    color: '#FFF', fontSize: 20, fontFamily: typography.fontFamily.semiBold,
+    textAlign: 'center', marginBottom: 20,
+  },
+  objectBubble: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: 20, paddingVertical: 15, borderRadius: 30,
+    minHeight: 60,
+  },
+  objectBubbleText: {
+    color: '#FFF', fontSize: 16, fontFamily: typography.fontFamily.semiBold, flex: 1,
+  }
 });

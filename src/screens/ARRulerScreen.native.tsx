@@ -83,7 +83,7 @@ export default function ARRulerScreen({ navigation }: any) {
   } | null>(null);
 
   // Debug & Sync Controls
-  const [chunkSizeMB, setChunkSizeMB] = useState(45); // 45MB Supabase limit
+  const [chunkSizeMB, setChunkSizeMB] = useState(500); // 500MB limit for Supabase Pro
   const [showDebugPanel, setShowDebugPanel] = useState(true);
   // Room scan state
   const [isRoomScanning, setIsRoomScanning] = useState(false);

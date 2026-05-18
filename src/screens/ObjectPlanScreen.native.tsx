@@ -8,7 +8,8 @@ import {
   ViroARPlane, ViroAnimations,
   ViroBox,
   ViroSphere,
-  ViroPolyline
+  ViroPolyline,
+  ViroText
 } from '@reactvision/react-viro';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Asset } from 'expo-asset';
@@ -233,7 +234,9 @@ const ARScene = (props: any) => {
      crystalUri,
      selectedObjectId, setSelectedObjectId,
      activeTransformMode,
-     isXRayMode
+     isXRayMode,
+     isTapeMode,
+     tapePoints, setTapePoints
   } = props.sceneNavigator.viroAppProps;
   
   const [rings, setRings] = useState<{ id: number; position: [number, number, number] }[]>([]);
@@ -303,6 +306,12 @@ const ARScene = (props: any) => {
   };
 
   const handleSceneClick = (position: number[], source: any) => {
+    if (isTapeMode) {
+      if (!ghostPosition) return;
+      setTapePoints((prev: any) => [...prev, ghostPosition]);
+      return;
+    }
+
     if (pendingModelContext && onPlaceGhost) {
       onPlaceGhost();
       return;
@@ -492,6 +501,54 @@ const ARScene = (props: any) => {
           isXRayMode={isXRayMode}
         />
       ))}
+
+      {/* Tape Measure Overlay */}
+      {isTapeMode && tapePoints.length > 0 && (
+         <>
+           <ViroPolyline
+             position={[0,0,0]}
+             points={ghostPosition ? [...tapePoints, ghostPosition] : tapePoints}
+             thickness={0.015}
+             materials={["reticleDotMaterial"]}
+           />
+           
+           {/* Placed dimension texts */}
+           {tapePoints.map((pt, i) => {
+             if (i === 0) return null;
+             const prevPt = tapePoints[i - 1];
+             const dist = Math.sqrt(Math.pow(pt[0] - prevPt[0], 2) + Math.pow(pt[1] - prevPt[1], 2) + Math.pow(pt[2] - prevPt[2], 2));
+             return (
+               <ViroText
+                 key={`tape-text-${i}`}
+                 position={[
+                   (prevPt[0] + pt[0]) / 2,
+                   (prevPt[1] + pt[1]) / 2 + 0.1,
+                   (prevPt[2] + pt[2]) / 2
+                 ]}
+                 text={`${dist.toFixed(2)} m`}
+                 scale={[0.2, 0.2, 0.2]}
+                 style={{ fontFamily: 'Arial', fontSize: 24, color: '#FFF' }}
+                 transformBehaviors={["billboard"]}
+               />
+             );
+           })}
+
+           {/* Live dimension text */}
+           {ghostPosition && (
+              <ViroText
+                 position={[
+                   (tapePoints[tapePoints.length - 1][0] + ghostPosition[0]) / 2,
+                   (tapePoints[tapePoints.length - 1][1] + ghostPosition[1]) / 2 + 0.1,
+                   (tapePoints[tapePoints.length - 1][2] + ghostPosition[2]) / 2
+                 ]}
+                 text={`${Math.sqrt(Math.pow(ghostPosition[0] - tapePoints[tapePoints.length - 1][0], 2) + Math.pow(ghostPosition[1] - tapePoints[tapePoints.length - 1][1], 2) + Math.pow(ghostPosition[2] - tapePoints[tapePoints.length - 1][2], 2)).toFixed(2)} m`}
+                 scale={[0.2, 0.2, 0.2]}
+                 style={{ fontFamily: 'Arial', fontSize: 24, color: '#FFF' }}
+                 transformBehaviors={["billboard"]}
+              />
+           )}
+         </>
+      )}
     </ViroARScene>
   );
 };
@@ -540,6 +597,11 @@ export default function SandboxARScreen({ navigation }: any) {
   const [activeTransformMode, setActiveTransformMode] = useState<'move' | 'rotate' | null>('rotate');
   const [isObjectListOpen, setIsObjectListOpen] = useState(false);
   const [isXRayMode, setIsXRayMode] = useState(false);
+  
+  // Tape measure state
+  const [isTapeMode, setIsTapeMode] = useState(false);
+  const [tapePoints, setTapePoints] = useState<number[][]>([]);
+  
   const selectedObject = placedObjects.find(o => o.id === selectedObjectId);
 
   // Catalog Modal States
@@ -695,7 +757,9 @@ export default function SandboxARScreen({ navigation }: any) {
            crystalUri,
            selectedObjectId, setSelectedObjectId,
            activeTransformMode,
-           isXRayMode
+           isXRayMode,
+           isTapeMode,
+           tapePoints, setTapePoints
         }}
         style={styles.viroContainer} 
         occlusionMode={isXRayMode ? undefined : "depthBased"}
@@ -709,6 +773,12 @@ export default function SandboxARScreen({ navigation }: any) {
           <Text style={styles.backIcon}>←</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>Multi Models Viewer</Text>
+        <TouchableOpacity onPress={() => {
+          setIsTapeMode(!isTapeMode);
+          if (isTapeMode) setTapePoints([]); // Clear points when turning off
+        }} style={[styles.backButton, isTapeMode && { backgroundColor: 'rgba(0,230,255,0.3)' }]}>
+          <Text style={{ fontSize: 18 }}>📏</Text>
+        </TouchableOpacity>
         <TouchableOpacity onPress={() => setIsObjectListOpen(!isObjectListOpen)} style={[styles.backButton, isObjectListOpen && { backgroundColor: 'rgba(0,230,255,0.3)' }]}>
           <Text style={{ fontSize: 18 }}>👁️</Text>
         </TouchableOpacity>
@@ -824,7 +894,9 @@ export default function SandboxARScreen({ navigation }: any) {
           )}
           
           {/* Instruction hint */}
-          {pendingModelContext ? (
+          {isTapeMode ? (
+            <Text style={styles.hintText}>{tapePoints.length === 0 ? "Aim at floor and tap to place start point" : "Tap to continue measuring, toggle ruler to clear"}</Text>
+          ) : pendingModelContext ? (
             <Text style={styles.hintText}>Move phone to position ghost • Tap PLACE to confirm</Text>
           ) : hasPlacedAny && !selectedObjectId ? (
             <Text style={styles.hintText}>Select an object via the 👁️ menu to edit</Text>

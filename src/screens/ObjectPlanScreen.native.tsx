@@ -132,11 +132,14 @@ const ARNodeComponent = ({ obj, index, setPlacedObjects, arSceneRef, selectedObj
   const lastHitTest = useRef<number>(0);
 
   const handleDrag = (dragToPos: number[], source: any) => {
-    setPlacedObjects((prev: ARPlacedObject[]) => {
-      return prev.map(p =>
-        p.id === obj.id ? { ...p, position: [dragToPos[0], dragToPos[1], dragToPos[2]] as [number, number, number] } : p
-      );
-    });
+    // Only update global state on release (source === 3) to prevent native bridge feedback loops (shooting away)
+    if (source === 3) {
+      setPlacedObjects((prev: ARPlacedObject[]) => {
+        return prev.map(p =>
+          p.id === obj.id ? { ...p, position: [dragToPos[0], dragToPos[1], dragToPos[2]] as [number, number, number] } : p
+        );
+      });
+    }
 
     const now = Date.now();
     if (arSceneRef && arSceneRef.current && (now - lastHitTest.current > 100)) {

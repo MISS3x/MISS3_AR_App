@@ -74,6 +74,7 @@
 - [x] **26. AR Tracking Tape (Linear Measure & Object Area)**
 - [x] **27. Real-Time Roomba LiDAR map sweeping**
 - [x] **28. Configurable Mesh Color via Props** (hot-reloadable z JS)
+- [x] **29. Multi Models Sandbox** (Select objects, Lock Scale, Slider rotation, Point-Rotate mode) ✅
 
 ## LiDAR Mesh & 3D Scanning (Roadmap)
 - [ ] **29. Full Mesh Export** — Serializace `ARMeshAnchor` vertices+faces → JSONB/PLY → uložení do Supabase

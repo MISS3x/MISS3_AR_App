@@ -378,7 +378,7 @@ export default function ARViewerScreen({ route, navigation }: ARViewerScreenProp
         if (fileInfo.exists) {
            console.log("Model loaded from cache:", localUri);
            if (isMounted) {
-             setLocalModelPath(`file://${localUri}`);
+             setLocalModelPath(localUri);
              setIsLoading(false);
            }
            return;
@@ -388,7 +388,7 @@ export default function ARViewerScreen({ route, navigation }: ARViewerScreenProp
         const { uri } = await FileSystem.downloadAsync(modelUrl, localUri);
         
         if (isMounted) {
-          setLocalModelPath(`file://${uri}`);
+          setLocalModelPath(uri);
           setIsLoading(false);
         }
       } catch (err) {

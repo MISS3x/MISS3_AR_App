@@ -22,7 +22,7 @@ export type RootStackParamList = {
   CompanySelect: undefined;
   ModelList: { companyId: string; companyName: string };
   ModelDetail: { model: any };
-  ARViewer: { modelUrl: string; modelTitle: string; iosSrc?: string };
+  ARViewer: { modelUrl: string; modelTitle: string; iosSrc?: string; modelTransform?: any };
   RoomSandbox: undefined;
   ARRuler: undefined;
   ObjectCapture: { projectId?: string; roomCameraTransform?: number[]; returnToRoomScan?: boolean } | undefined;

@@ -12,6 +12,7 @@ import {
 } from '@reactvision/react-viro';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Asset } from 'expo-asset';
+import Slider from '@react-native-community/slider';
 
 import { colors, spacing, borderRadius, typography, shadows } from '../theme/theme';
 import { supabase } from '../lib/supabase';
@@ -72,6 +73,7 @@ interface ARPlacedObject {
   rotation: [number, number, number];
   yOffset: number;
   modelOffset: [number, number, number];
+  scaleLocked?: boolean;
 }
 
 interface CatalogModel {
@@ -89,7 +91,7 @@ interface CatalogModel {
 }
 
 
-const ARNodeComponent = ({ obj, index, setPlacedObjects, arSceneRef }: { obj: ARPlacedObject, index: number, setPlacedObjects: any, arSceneRef?: any }) => {
+const ARNodeComponent = ({ obj, index, setPlacedObjects, arSceneRef, selectedObjectId, setSelectedObjectId, isPointRotateMode }: { obj: ARPlacedObject, index: number, setPlacedObjects: any, arSceneRef?: any, selectedObjectId?: string | null, setSelectedObjectId?: any, isPointRotateMode?: boolean }) => {
   const nodeRef = useRef<any>(null);
   const modelRef = useRef<any>(null);
   const currentScale = useRef<[number, number, number]>(obj.scale);
@@ -97,7 +99,15 @@ const ARNodeComponent = ({ obj, index, setPlacedObjects, arSceneRef }: { obj: AR
   const gestureBaseScale = useRef<[number, number, number]>(obj.scale);
   const gestureBaseRotation = useRef<[number, number, number]>(obj.rotation);
 
+  useEffect(() => {
+    if (Math.abs(currentRotation.current[1] - obj.rotation[1]) > 0.01) {
+      currentRotation.current = obj.rotation;
+      if (nodeRef.current) nodeRef.current.setNativeProps({ rotation: obj.rotation });
+    }
+  }, [obj.rotation]);
+
   const onPinch = (pinchState: number, scaleFactor: number, source: any) => {
+    if (obj.scaleLocked !== false) return; // Locked by default
     if (pinchState === 1) gestureBaseScale.current = [...currentScale.current];
     const newScale: [number, number, number] = [
       gestureBaseScale.current[0] * scaleFactor,
@@ -162,6 +172,9 @@ const ARNodeComponent = ({ obj, index, setPlacedObjects, arSceneRef }: { obj: AR
       onDrag={handleDrag}
       onPinch={onPinch}
       onRotate={onRotate}
+      onClick={() => {
+        if (!isPointRotateMode && setSelectedObjectId) setSelectedObjectId(obj.id);
+      }}
     >
       <Viro3DObject
         key={`mesh_${obj.id}`}
@@ -217,7 +230,9 @@ const ARScene = (props: any) => {
      pendingModelContext, setPendingModelContext,
      ghostPosition, setGhostPosition,
      onPlaceGhost,
-     crystalUri
+     crystalUri,
+     selectedObjectId, setSelectedObjectId,
+     isPointRotateMode, setIsPointRotateMode
   } = props.sceneNavigator.viroAppProps;
   
   const [rings, setRings] = useState<{ id: number; position: [number, number, number] }[]>([]);
@@ -287,8 +302,20 @@ const ARScene = (props: any) => {
   };
 
   const handleSceneClick = (position: number[], source: any) => {
-    // Disabled placing objects on tap. 
-    // Objects should only be placed using the UI button.
+    if (isPointRotateMode && selectedObjectId && position && position.length === 3) {
+      setPlacedObjects((prev: ARPlacedObject[]) => prev.map(o => {
+        if (o.id === selectedObjectId) {
+          const dx = position[0] - o.position[0];
+          const dz = position[2] - o.position[2];
+          const angleRad = Math.atan2(dx, dz);
+          const angleDeg = angleRad * (180 / Math.PI);
+          return { ...o, rotation: [o.rotation[0], angleDeg, o.rotation[2]] };
+        }
+        return o;
+      }));
+    } else if (!isPointRotateMode && selectedObjectId) {
+       setSelectedObjectId(null);
+    }
   };
 
   const updateFloorYFromPlane = (anchor: any) => {
@@ -402,29 +429,42 @@ const ARScene = (props: any) => {
         </ViroNode>
       )}
 
-      {/* Ghost preview — x-ray model following floor reticle */}
+      {/* Ghost preview — translucent model following floor reticle */}
       {pendingModelContext && ghostPosition && (
         <ViroNode position={ghostPosition} opacity={0.65}>
-          {/* Ghost 3D model with x-ray material */}
-          <Viro3DObject
-            source={{ uri: pendingModelContext.localUri }}
-            resources={[]}
-            type={(() => {
-              const ext = pendingModelContext.localUri.split('.').pop()?.toUpperCase() || 'GLB';
-              return ext === 'GLTF' ? 'GLTF' : ext === 'OBJ' ? 'OBJ' : ext === 'VRX' ? 'VRX' : 'GLB';
-            })()}
-            position={[
-              pendingModelContext.model_transform?.modelOffset?.x || 0,
-              pendingModelContext.model_transform?.modelOffset?.y || 0,
-              pendingModelContext.model_transform?.modelOffset?.z || 0
-            ]}
+          {/* Apply scale to an intermediate node, just like placed objects */}
+          <ViroNode
             scale={[
               pendingModelContext.model_transform?.scale?.x || 1,
               pendingModelContext.model_transform?.scale?.y || 1,
               pendingModelContext.model_transform?.scale?.z || 1
             ]}
-            materials={["xrayMaterial"]}
-          />
+            rotation={[
+              pendingModelContext.model_transform?.rotation?.x || 0,
+              pendingModelContext.model_transform?.rotation?.y || 0,
+              pendingModelContext.model_transform?.rotation?.z || 0
+            ]}
+          >
+            <Viro3DObject
+              source={{ uri: pendingModelContext.localUri }}
+              resources={[]}
+              type={(() => {
+                const ext = pendingModelContext.localUri.split('.').pop()?.toUpperCase() || 'GLB';
+                return ext === 'GLTF' ? 'GLTF' : ext === 'OBJ' ? 'OBJ' : ext === 'VRX' ? 'VRX' : 'GLB';
+              })()}
+              position={[
+                pendingModelContext.model_transform?.modelOffset?.x || 0,
+                pendingModelContext.model_transform?.modelOffset?.y || 0,
+                pendingModelContext.model_transform?.modelOffset?.z || 0
+              ]}
+              scale={[1, 1, 1]}
+              onError={(e) => {
+                const errorMessage = e && e.nativeEvent ? e.nativeEvent.error : String(e);
+                console.warn("Ghost Model Render Error:", errorMessage);
+                Alert.alert("Viro Error", "Failed to load model: " + errorMessage);
+              }}
+            />
+          </ViroNode>
         </ViroNode>
       )}
 
@@ -441,9 +481,29 @@ const ARScene = (props: any) => {
         </ViroNode>
       )}
       
-      {placedObjects && placedObjects.map((obj: ARPlacedObject, i: number) => (
-        <ARNodeComponent key={obj.id} obj={obj} index={i} setPlacedObjects={setPlacedObjects} arSceneRef={arSceneRef} />
+      {/* Placed Objects */}
+      {placedObjects.map((obj: ARPlacedObject, index: number) => (
+        <ARNodeComponent 
+          key={obj.id} 
+          obj={obj} 
+          index={index} 
+          setPlacedObjects={setPlacedObjects} 
+          arSceneRef={arSceneRef}
+          selectedObjectId={selectedObjectId}
+          setSelectedObjectId={setSelectedObjectId}
+          isPointRotateMode={isPointRotateMode}
+        />
       ))}
+
+      {/* Point rotate line */}
+      {isPointRotateMode && selectedObjectId && ghostPosition && (
+        <ViroPolyline
+          position={[0,0,0]}
+          points={[placedObjects.find((o: any) => o.id === selectedObjectId)?.position || [0,0,0], ghostPosition]}
+          thickness={0.02}
+          materials={["reticleDotMaterial"]}
+        />
+      )}
     </ViroARScene>
   );
 };
@@ -456,6 +516,11 @@ export default function SandboxARScreen({ navigation }: any) {
   const [pendingModelContext, setPendingModelContext] = useState<(CatalogModel & { localUri: string }) | null>(null);
   const [ghostPosition, setGhostPosition] = useState<[number, number, number] | null>(null);
   
+  // Selection & UI state
+  const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
+  const [isPointRotateMode, setIsPointRotateMode] = useState(false);
+  const selectedObject = placedObjects.find(o => o.id === selectedObjectId);
+
   // Catalog Modal States
   const [isCatalogOpen, setIsCatalogOpen] = useState(false);
   const [catalogModels, setCatalogModels] = useState<CatalogModel[]>([]);
@@ -535,7 +600,7 @@ export default function SandboxARScreen({ navigation }: any) {
 
       setPendingModelContext({
          ...model,
-         localUri: `file://${finalUri}`
+         localUri: finalUri
       });
       setGhostPosition(null); // Reset ghost position
       
@@ -565,22 +630,17 @@ export default function SandboxARScreen({ navigation }: any) {
     const offsetArgs = pendingModelContext.model_transform?.modelOffset;
     const parsedOffset: [number, number, number] = offsetArgs ? [offsetArgs.x, offsetArgs.y, offsetArgs.z] : [0, 0, 0];
 
-    // ViroReact SceneKit reuses the same native node for identical source URIs.
-    // Append a unique query param so each placed instance gets its own node.
     const instanceId = Math.random().toString(36).substring(7);
-    const uniqueUri = pendingModelContext.localUri.includes('?')
-      ? `${pendingModelContext.localUri}&inst=${instanceId}`
-      : `${pendingModelContext.localUri}?inst=${instanceId}`;
-
     const newObject: ARPlacedObject = {
       id: instanceId,
       title: pendingModelContext.title || 'Model',
-      localUri: uniqueUri,
+      localUri: pendingModelContext.localUri,
       position: [frozenX, frozenY, frozenZ] as [number, number, number],
       scale: parsedScale,
       rotation: parsedRotation,
       yOffset: 0,
       modelOffset: parsedOffset,
+      scaleLocked: true, // locked by default
     };
 
     // Add to placed objects FIRST, then reset ghost
@@ -611,6 +671,8 @@ export default function SandboxARScreen({ navigation }: any) {
            ghostPosition, setGhostPosition,
            onPlaceGhost: handlePlaceGhost,
            crystalUri,
+           selectedObjectId, setSelectedObjectId,
+           isPointRotateMode, setIsPointRotateMode
         }}
         style={styles.viroContainer} 
         occlusionMode="depthBased"
@@ -631,10 +693,54 @@ export default function SandboxARScreen({ navigation }: any) {
         )}
       </View>
 
-      {/* Bottom Action Area — always 2 buttons when model is loaded */}
+      {/* Bottom Action Area */}
       {!isCatalogOpen && (
         <View style={[styles.bottomOverlay, { paddingBottom: insets.bottom + spacing.lg }]}>
-          {pendingModelContext ? (
+          {selectedObjectId && selectedObject ? (
+             <View style={styles.selectedPanel}>
+               <View style={styles.selectedHeader}>
+                 <Text style={styles.selectedTitle} numberOfLines={1}>{selectedObject.title}</Text>
+                 <TouchableOpacity onPress={() => { setSelectedObjectId(null); setIsPointRotateMode(false); }}>
+                   <Text style={{color: '#FFF', fontSize: 20}}>✕</Text>
+                 </TouchableOpacity>
+               </View>
+
+               <View style={styles.toolRow}>
+                 <TouchableOpacity 
+                   style={[styles.toolButton, selectedObject.scaleLocked !== false ? styles.toolActive : null]}
+                   onPress={() => {
+                      setPlacedObjects(prev => prev.map(o => o.id === selectedObjectId ? {...o, scaleLocked: o.scaleLocked === false ? true : false} : o));
+                   }}
+                 >
+                   <Text style={[styles.toolText, selectedObject.scaleLocked !== false ? styles.toolActiveText : null]}>
+                      {selectedObject.scaleLocked !== false ? '🔒 Scale Locked' : '🔓 Scale Unlocked'}
+                   </Text>
+                 </TouchableOpacity>
+                 <TouchableOpacity 
+                   style={[styles.toolButton, isPointRotateMode ? styles.toolActive : null]}
+                   onPress={() => setIsPointRotateMode(!isPointRotateMode)}
+                 >
+                   <Text style={[styles.toolText, isPointRotateMode ? styles.toolActiveText : null]}>🎯 Point Rotate</Text>
+                 </TouchableOpacity>
+               </View>
+
+               <Text style={{color: '#AAA', marginTop: 15, marginBottom: 5}}>Rotation ({Math.round(selectedObject.rotation[1])}°)</Text>
+               <Slider
+                 style={{width: '100%', height: 40}}
+                 minimumValue={0}
+                 maximumValue={360}
+                 value={((selectedObject.rotation[1] % 360) + 360) % 360}
+                 onValueChange={(val) => {
+                   setPlacedObjects(prev => prev.map(o => o.id === selectedObjectId ? {...o, rotation: [o.rotation[0], val, o.rotation[2]]} : o));
+                 }}
+                 minimumTrackTintColor={colors.primary}
+                 maximumTrackTintColor="#555"
+               />
+               <Text style={[styles.hintText, { marginTop: 10 }]}>
+                 {isPointRotateMode ? "Aim reticle at floor and tap to rotate model" : "Use slider or point rotate tool"}
+               </Text>
+             </View>
+          ) : pendingModelContext ? (
             // Ghost active — CHANGE MODEL + PLACE MODEL / PLACE ANOTHER
             <View style={styles.buttonRow}>
               <TouchableOpacity 

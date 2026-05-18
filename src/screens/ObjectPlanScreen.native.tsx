@@ -505,11 +505,11 @@ const ARScene = (props: any) => {
       ))}
 
       {/* Tape Measure Overlay */}
-      {isTapeMode && tapePoints.length > 0 && (
+      {tapePoints.length > 0 && (
          <>
            <ViroPolyline
              position={[0,0,0]}
-             points={ghostPosition ? [...tapePoints, ghostPosition] : tapePoints}
+             points={isTapeMode && ghostPosition ? [...tapePoints, ghostPosition] : tapePoints}
              thickness={0.015}
              materials={["reticleDotMaterial"]}
            />
@@ -536,7 +536,7 @@ const ARScene = (props: any) => {
            })}
 
            {/* Live dimension text */}
-           {ghostPosition && (
+           {isTapeMode && ghostPosition && (
               <ViroText
                  position={[
                    (tapePoints[tapePoints.length - 1][0] + ghostPosition[0]) / 2,
@@ -790,8 +790,10 @@ export default function SandboxARScreen({ navigation }: any) {
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>Multi Models Viewer</Text>
         <TouchableOpacity onPress={() => {
+          if (!isTapeMode) {
+            setTapePoints([]); // Clear points when starting a NEW measurement
+          }
           setIsTapeMode(!isTapeMode);
-          if (isTapeMode) setTapePoints([]); // Clear points when turning off
         }} style={[styles.backButton, isTapeMode && { backgroundColor: 'rgba(0,230,255,0.3)' }]}>
           <Text style={{ fontSize: 18 }}>📏</Text>
         </TouchableOpacity>

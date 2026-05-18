@@ -12,8 +12,6 @@ import {
 } from '@reactvision/react-viro';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Asset } from 'expo-asset';
-import Slider from '@react-native-community/slider';
-
 import { colors, spacing, borderRadius, typography, shadows } from '../theme/theme';
 import { supabase } from '../lib/supabase';
 
@@ -509,6 +507,37 @@ const ARScene = (props: any) => {
   );
 };
 
+const PureJSSlider = ({ value, minimumValue, maximumValue, onValueChange, style, minimumTrackTintColor, maximumTrackTintColor }: any) => {
+  const [width, setWidth] = useState(0);
+
+  const handleMove = (x: number) => {
+    if (width === 0) return;
+    const percentage = Math.max(0, Math.min(1, x / width));
+    const val = minimumValue + percentage * (maximumValue - minimumValue);
+    onValueChange(val);
+  };
+
+  return (
+    <View 
+      style={[style, { justifyContent: 'center' }]} 
+      onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
+      onStartShouldSetResponder={() => true}
+      onResponderGrant={(evt) => handleMove(evt.nativeEvent.locationX)}
+      onResponderMove={(evt) => handleMove(evt.nativeEvent.locationX)}
+    >
+      <View style={{ height: 4, backgroundColor: maximumTrackTintColor || '#555', borderRadius: 2 }} pointerEvents="none" />
+      <View style={{ 
+        position: 'absolute', 
+        left: Math.max(0, width * ((value - minimumValue) / (maximumValue - minimumValue)) - 10), 
+        width: 20, 
+        height: 20, 
+        borderRadius: 10, 
+        backgroundColor: minimumTrackTintColor || '#00E6FF' 
+      }} pointerEvents="none" />
+    </View>
+  );
+};
+
 export default function SandboxARScreen({ navigation }: any) {
   const insets = useSafeAreaInsets();
   
@@ -727,13 +756,13 @@ export default function SandboxARScreen({ navigation }: any) {
                  </TouchableOpacity>
                </View>
 
-               <Text style={{color: '#AAA', marginBottom: 5}}>Rotation ({Math.round(selectedObject.rotation[1])}°)</Text>
-               <Slider
+               <Text style={{color: '#AAA', marginBottom: 15}}>Rotation ({Math.round(selectedObject.rotation[1])}°)</Text>
+               <PureJSSlider
                  style={{width: '100%', height: 40}}
                  minimumValue={0}
                  maximumValue={360}
                  value={((selectedObject.rotation[1] % 360) + 360) % 360}
-                 onValueChange={(val) => {
+                 onValueChange={(val: number) => {
                    setPlacedObjects(prev => prev.map(o => o.id === selectedObjectId ? {...o, rotation: [o.rotation[0], val, o.rotation[2]]} : o));
                  }}
                  minimumTrackTintColor={colors.primary}

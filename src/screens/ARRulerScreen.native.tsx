@@ -723,6 +723,19 @@ export default function ARRulerScreen({ navigation }: any) {
             formData.append('file', { uri: fileUri, name: `chunk_${i}.obj`, type: 'model/obj' } as any);
             await supabase.storage.from('mesh-scans').upload(fileName, formData, { upsert: true });
             await FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => { });
+            
+            const scanId = `mesh_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+            await supabase.from('ar_mesh_scans').insert({
+              id: scanId,
+              project_id: projectData.id,
+              user_id: userId,
+              file_path: fileName,
+              file_size: chunk.byteSize,
+              vertices_count: chunk.vertexCount,
+              faces_count: chunk.faceCount,
+              format: 'obj',
+            });
+            
             addLog(`  ✅ Chunk ${i + 1} uploaded`);
           }
         } else {
@@ -1027,6 +1040,19 @@ export default function ARRulerScreen({ navigation }: any) {
                 contentType: 'text/plain',
                 upsert: true,
               });
+              
+              const scanId = `mesh_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+              await supabase.from('ar_mesh_scans').insert({
+                id: scanId,
+                project_id: projectData!.id,
+                user_id: userId,
+                file_path: fileName,
+                file_size: chunk.byteSize,
+                vertices_count: chunk.vertexCount,
+                faces_count: chunk.faceCount,
+                format: 'obj',
+              });
+              
               setMeshChunksUploaded(i + 1);
               addLogMesh(`✅ Chunk ${i+1} uploaded`);
             }
@@ -1349,6 +1375,19 @@ export default function ARRulerScreen({ navigation }: any) {
                     contentType: 'text/plain',
                     upsert: true,
                   });
+                  
+                  const scanId = `mesh_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+                  await supabase.from('ar_mesh_scans').insert({
+                    id: scanId,
+                    project_id: projectData.id,
+                    user_id: userId,
+                    file_path: fileName,
+                    file_size: chunk.byteSize,
+                    vertices_count: chunk.vertexCount,
+                    faces_count: chunk.faceCount,
+                    format: 'obj',
+                  });
+                  
                   setMeshChunksUploaded(i + 1);
                 }
                 addLogMesh(`✅ Batch ${meshStreamBatchRef.current}: ${chunks.length} chunks streamed (${(totalBytes/1024/1024).toFixed(1)}MB)`);

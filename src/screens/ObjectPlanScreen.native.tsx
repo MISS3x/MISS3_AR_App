@@ -943,22 +943,44 @@ export default function SandboxARScreen({ navigation }: any) {
                 const hue = (index * 137.5) % 360;
                 const bubbleColor = `hsl(${hue}, 80%, 40%)`;
                 return (
-                  <TouchableOpacity 
+                  <View 
                     style={[
                       styles.objectBubble,
                       { backgroundColor: bubbleColor },
                       isSelected && { borderWidth: 3, borderColor: '#FFF' }
                     ]}
-                    activeOpacity={0.8}
-                    onPress={() => {
-                      setSelectedObjectId(item.id);
-                      setActiveTransformMode('rotate'); // Default to rotate
-                      setIsObjectListOpen(false);
-                    }}
                   >
-                    <Text style={styles.objectBubbleText} numberOfLines={1}>{item.title}</Text>
-                    {isSelected && <Text style={{ color: '#FFF' }}>✓</Text>}
-                  </TouchableOpacity>
+                    <TouchableOpacity
+                      style={{ flex: 1, paddingVertical: 15, paddingHorizontal: 20 }}
+                      activeOpacity={0.8}
+                      onPress={() => {
+                        setSelectedObjectId(item.id);
+                        setActiveTransformMode('rotate'); // Default to rotate
+                        setIsObjectListOpen(false);
+                      }}
+                    >
+                      <Text style={styles.objectBubbleText} numberOfLines={1}>
+                        {item.title} {isSelected && '✓'}
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.deleteObjectButton}
+                      onPress={() => {
+                        Alert.alert("Smazat objekt", "Opravdu chcete tento objekt smazat z prostoru?", [
+                           { text: "Zrušit", style: "cancel" },
+                           { text: "Smazat", style: "destructive", onPress: () => {
+                               setPlacedObjects((prev: ARPlacedObject[]) => prev.filter(o => o.id !== item.id));
+                               if (selectedObjectId === item.id) {
+                                  setSelectedObjectId(null);
+                               }
+                           }}
+                        ]);
+                      }}
+                    >
+                      <Text style={{ color: '#FFF', fontSize: 18 }}>🗑️</Text>
+                    </TouchableOpacity>
+                  </View>
                 );
               }}
             />
@@ -1169,10 +1191,16 @@ const styles = StyleSheet.create({
   },
   objectBubble: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 20, paddingVertical: 15, borderRadius: 30,
-    minHeight: 60,
+    borderRadius: 30, minHeight: 60, overflow: 'hidden'
   },
   objectBubbleText: {
     color: '#FFF', fontSize: 16, fontFamily: typography.fontFamily.semiBold, flex: 1,
+  },
+  deleteObjectButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    backgroundColor: 'rgba(255, 0, 0, 0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
   }
 });

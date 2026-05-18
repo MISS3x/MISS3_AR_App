@@ -554,8 +554,10 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
             child.geometry = nil
             child.removeFromParentNode()
           }
-          cleared += 1
         }
+        // FULL RAM CLEAR: Remove the anchor entirely from the ARSession (CPU memory)
+        arView.session.remove(anchor: meshAnchor)
+        cleared += 1
       }
     }
     
@@ -1889,74 +1891,66 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
       
       let vertexBuffer = geometry.vertices
       let vertexCount = vertexBuffer.count
-      let vertexData = vertexBuffer.buffer.contents()
-      let vertexStride = vertexBuffer.stride
-      
-      var anchorV = ""
-      for i in 0..<vertexCount {
-        let ptr = vertexData.advanced(by: i * vertexStride)
-        let x = ptr.assumingMemoryBound(to: Float.self)[0]
-        let y = ptr.assumingMemoryBound(to: Float.self)[1]
-        let z = ptr.assumingMemoryBound(to: Float.self)[2]
-        
-        let local = simd_float4(x, y, z, 1)
-        let world = transform * local
-        anchorV += String(format: "v %.3f %.3f %.3f\n", world.x, world.y, world.z)
-      }
       
       let faceBuffer = geometry.faces
       let faceCount = faceBuffer.count
-      let indexBuffer = faceBuffer.buffer.contents()
       let bytesPerIndex = faceBuffer.bytesPerIndex
+      let indexBuffer = faceBuffer.buffer.contents()
       
-      var classificationPtr: UnsafeMutableRawPointer? = nil
-      if #available(iOS 13.4, *) {
-        if let classSource = geometry.classification {
-          classificationPtr = classSource.buffer.contents()
-        }
-      }
-      
-      var groupedFaces: [UInt8: String] = [:]
-      
-      for i in 0..<faceCount {
-        let offset = i * 3
-        var i0: Int, i1: Int, i2: Int
-        
-        if bytesPerIndex == 4 {
-          let ptr = indexBuffer.assumingMemoryBound(to: UInt32.self)
-          i0 = Int(ptr[offset]) + currentVertexOffset + 1
-          i1 = Int(ptr[offset + 1]) + currentVertexOffset + 1
-          i2 = Int(ptr[offset + 2]) + currentVertexOffset + 1
-        } else {
-          let ptr = indexBuffer.assumingMemoryBound(to: UInt16.self)
-          i0 = Int(ptr[offset]) + currentVertexOffset + 1
-          i1 = Int(ptr[offset + 1]) + currentVertexOffset + 1
-          i2 = Int(ptr[offset + 2]) + currentVertexOffset + 1
-        }
-        
-        let classId = classificationPtr?.load(fromByteOffset: i, as: UInt8.self) ?? 0
-        groupedFaces[classId, default: ""] += "f \(i0) \(i1) \(i2)\n"
-      }
-      
-      var anchorF = ""
-      for (classId, faces) in groupedFaces {
-          var mtlName = "None"
-          switch classId {
-          case 1: mtlName = "Wall"
-          case 2: mtlName = "Floor"
-          case 3: mtlName = "Ceiling"
-          case 4: mtlName = "Table"
-          case 5: mtlName = "Seat"
-          case 6: mtlName = "Window"
-          case 7: mtlName = "Door"
-          default: mtlName = "None"
+      // 1. Convert faces to Int32 for C++ decimator
+      var fData = Data()
+      if bytesPerIndex == 4 {
+          fData = Data(bytes: indexBuffer, count: faceCount * 3 * 4)
+      } else {
+          var int32Faces = [Int32](repeating: 0, count: faceCount * 3)
+          let ptr16 = indexBuffer.assumingMemoryBound(to: UInt16.self)
+          for i in 0..<(faceCount * 3) {
+              int32Faces[i] = Int32(ptr16[i])
           }
-          anchorF += "usemtl \(mtlName)\n"
-          anchorF += faces
+          fData = Data(bytes: &int32Faces, count: faceCount * 3 * 4)
+      }
+      
+      let vData = Data(bytes: vertexBuffer.buffer.contents(), count: vertexCount * 3 * MemoryLayout<Float>.size)
+      
+      // 2. Run Decimation (Reduce to 20% of original triangles)
+      let targetFaceCount = max(10, faceCount / 5)
+      
+      // Assuming MeshDecimator is available in the module umbrella header
+      guard let decimated = MeshDecimator.decimateMeshVertices(vData, faces: fData, targetCount: targetFaceCount),
+            let decVData = decimated["vertices"] as? Data,
+            let decFData = decimated["faces"] as? Data else {
+          continue
+      }
+      
+      let decVCount = decVData.count / (3 * MemoryLayout<Float>.size)
+      let decFCount = decFData.count / (3 * MemoryLayout<Int32>.size)
+      
+      // 3. Format vertices to OBJ string
+      var anchorV = ""
+      decVData.withUnsafeBytes { rawBuffer in
+          let vPtr = rawBuffer.bindMemory(to: Float.self).baseAddress!
+          for i in 0..<decVCount {
+              let local = simd_float4(vPtr[i*3], vPtr[i*3+1], vPtr[i*3+2], 1)
+              let world = transform * local
+              anchorV += String(format: "v %.3f %.3f %.3f\n", world.x, world.y, world.z)
+          }
+      }
+      
+      // 4. Format faces to OBJ string
+      var anchorF = "usemtl Default\n"
+      decFData.withUnsafeBytes { rawBuffer in
+          let fPtr = rawBuffer.bindMemory(to: Int32.self).baseAddress!
+          for i in 0..<decFCount {
+              let i0 = Int(fPtr[i*3]) + currentVertexOffset + 1
+              let i1 = Int(fPtr[i*3+1]) + currentVertexOffset + 1
+              let i2 = Int(fPtr[i*3+2]) + currentVertexOffset + 1
+              anchorF += "f \(i0) \(i1) \(i2)\n"
+          }
       }
       
       let anchorStr = anchorV + anchorF
       
+      // 5. Chunking logic
       if currentObj.utf8.count + anchorStr.utf8.count > maxSize && chunkVertexCount > 0 {
         chunks.append([
           "obj": currentObj,
@@ -1965,53 +1959,31 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
           "byteSize": currentObj.utf8.count
         ])
         
-        currentObj = "# MISS3 AR Mesh Export Chunk\n\n"
+        currentObj = "# MISS3 AR Mesh Export Chunk (Decimated)\n\n"
         currentVertexOffset = 0
         chunkVertexCount = 0
         chunkFaceCount = 0
         
-        // Recompute face strings for new 1-indexed chunk offset
-        var groupedFacesNew: [UInt8: String] = [:]
-        for i in 0..<faceCount {
-          let offset = i * 3
-          var i0: Int, i1: Int, i2: Int
-          if bytesPerIndex == 4 {
-            let ptr = indexBuffer.assumingMemoryBound(to: UInt32.self)
-            i0 = Int(ptr[offset]) + 1
-            i1 = Int(ptr[offset + 1]) + 1
-            i2 = Int(ptr[offset + 2]) + 1
-          } else {
-            let ptr = indexBuffer.assumingMemoryBound(to: UInt16.self)
-            i0 = Int(ptr[offset]) + 1
-            i1 = Int(ptr[offset + 1]) + 1
-            i2 = Int(ptr[offset + 2]) + 1
-          }
-          let classId = classificationPtr?.load(fromByteOffset: i, as: UInt8.self) ?? 0
-          groupedFacesNew[classId, default: ""] += "f \(i0) \(i1) \(i2)\n"
-        }
-        
-        anchorF = ""
-        for (classId, faces) in groupedFacesNew {
-            var mtlName = "None"
-            switch classId {
-            case 1: mtlName = "Wall"
-            case 2: mtlName = "Floor"
-            case 3: mtlName = "Ceiling"
-            case 4: mtlName = "Table"
-            case 5: mtlName = "Seat"
-            case 6: mtlName = "Window"
-            case 7: mtlName = "Door"
-            default: mtlName = "None"
+        // Recompute faces for the new chunk 1-indexed offset
+        anchorF = "usemtl Default\n"
+        decFData.withUnsafeBytes { rawBuffer in
+            let fPtr = rawBuffer.bindMemory(to: Int32.self).baseAddress!
+            for i in 0..<decFCount {
+                let i0 = Int(fPtr[i*3]) + 1
+                let i1 = Int(fPtr[i*3+1]) + 1
+                let i2 = Int(fPtr[i*3+2]) + 1
+                anchorF += "f \(i0) \(i1) \(i2)\n"
             }
-            anchorF += "usemtl \(mtlName)\n"
-            anchorF += faces
         }
       }
       
       currentObj += (anchorV + anchorF)
-      currentVertexOffset += vertexCount
-      chunkVertexCount += vertexCount
-      chunkFaceCount += faceCount
+      currentVertexOffset += decVCount
+      chunkVertexCount += decVCount
+      chunkFaceCount += decFCount
+      
+      // RAM CLEAR: We can explicitly remove the anchor from ARSession if we want,
+      // but usually the session manages it. To force clear, we just don't retain it.
     }
     
     if chunkVertexCount > 0 {

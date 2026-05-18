@@ -1812,7 +1812,7 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
         let local = simd_float4(x, y, z, 1)
         let world = transform * local
         
-        obj += "v \(world.x) \(world.y) \(world.z)\n"
+        obj += String(format: "v %.3f %.3f %.3f\n", world.x, world.y, world.z)
       }
       totalVertices += vertexCount
       
@@ -1901,7 +1901,7 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
         
         let local = simd_float4(x, y, z, 1)
         let world = transform * local
-        anchorV += "v \(world.x) \(world.y) \(world.z)\n"
+        anchorV += String(format: "v %.3f %.3f %.3f\n", world.x, world.y, world.z)
       }
       
       let faceBuffer = geometry.faces

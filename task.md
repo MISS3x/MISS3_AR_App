@@ -6,10 +6,10 @@
 
 *Žádné aktuální blokery* ✅
 
-## 📊 Progress: **14 / 26 done (53%)**
+## 📊 Progress: **14 / 27 done (52%)**
 
 ```
-#####################################################-----------------------------------------------  53%
+####################################################------------------------------------------------  52%
 ```
 
 | Section | Done | Total | % |
@@ -19,6 +19,7 @@
 | Quick Look AR (temp) | 1 | 1 | 100% |
 | UI/UX Polish | 4 | 4 | 100% |
 | ARKit Module (native) | 5 | 8 | 62% |
+| LiDAR Mesh | 1 | 2 | 50% |
 | Android Build | 0 | 2 | 0% |
 | Git & Cleanup | 2 | 2 | 100% |
 
@@ -77,12 +78,13 @@
 - [x] **29. Multi Models Sandbox** (Select objects, Lock Scale, Slider rotation, Point-Rotate mode, X-Ray Mode + Bug fixes) ✅
 
 ## LiDAR Mesh & 3D Scanning (Roadmap)
-- [ ] **29. Full Mesh Export** — Serializace `ARMeshAnchor` vertices+faces → JSONB/PLY → uložení do Supabase
+- [x] **29. Full Mesh Export** — Serializace `ARMeshAnchor` vertices+faces → JSONB/PLY → uložení do Supabase
 - [ ] **30. Web 3D Rekonstrukce** — Three.js viewer na webu: načtení meshe z DB a zobrazení naskenované místnosti v prohlížeči
 - [ ] **31. Mesh Classification** — `ARMeshClassification` pro rozlišení podlaha/zeď/strop/stůl/dveře/okno + barevné kódování
 - [ ] **32. Vertex Color Texturing** — Pro každý vertex vzít barvu z kamery (`ARFrame.capturedImage` + `camera.projectPoint()`) → barevný 3D model
 - [ ] **33. Multi-Frame Texture Fusion** — Pokročilé blendování textur z více kamerových snímků pro seamless výsledek (Polycam-style)
 - [ ] **34. Object Scanning Mode** — Dedicated sken jednotlivých objektů (nábytek, sochy) s exportem OBJ/USDZ + textura
+- [ ] **35. Mesh Optimization (Export)** — Snížení velikosti OBJ souborů (redukce přesnosti na milimetry `%.3f`, zkoumání přechodu na GLB/Draco kompresi na zařízení).
 
 ## Android Build
 - [ ] **#23** — EAS Android APK build

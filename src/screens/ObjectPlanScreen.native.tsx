@@ -90,7 +90,7 @@ interface CatalogModel {
 }
 
 
-const ARNodeComponent = ({ obj, index, setPlacedObjects, arSceneRef, selectedObjectId, setSelectedObjectId, isPointRotateMode }: { obj: ARPlacedObject, index: number, setPlacedObjects: any, arSceneRef?: any, selectedObjectId?: string | null, setSelectedObjectId?: any, isPointRotateMode?: boolean }) => {
+const ARNodeComponent = ({ obj, index, setPlacedObjects, arSceneRef, selectedObjectId, setSelectedObjectId, isPointRotateMode, isXRayMode }: { obj: ARPlacedObject, index: number, setPlacedObjects: any, arSceneRef?: any, selectedObjectId?: string | null, setSelectedObjectId?: any, isPointRotateMode?: boolean, isXRayMode?: boolean }) => {
   const nodeRef = useRef<any>(null);
   const modelRef = useRef<any>(null);
   const currentScale = useRef<[number, number, number]>(obj.scale);
@@ -183,6 +183,7 @@ const ARNodeComponent = ({ obj, index, setPlacedObjects, arSceneRef, selectedObj
           const ext = obj.localUri.split('.').pop()?.toUpperCase() || 'GLB';
           return ext === 'GLTF' ? 'GLTF' : ext === 'OBJ' ? 'OBJ' : ext === 'VRX' ? 'VRX' : 'GLB';
         })()}
+        materials={isXRayMode ? ["xrayMaterial"] : []}
         position={[obj.modelOffset[0], obj.yOffset + obj.modelOffset[1], obj.modelOffset[2]]}
         scale={[1, 1, 1]}
         onLoadEnd={async () => {
@@ -231,7 +232,8 @@ const ARScene = (props: any) => {
      onPlaceGhost,
      crystalUri,
      selectedObjectId, setSelectedObjectId,
-     isPointRotateMode, setIsPointRotateMode
+     isPointRotateMode, setIsPointRotateMode,
+     isXRayMode
   } = props.sceneNavigator.viroAppProps;
   
   const [rings, setRings] = useState<{ id: number; position: [number, number, number] }[]>([]);
@@ -451,6 +453,7 @@ const ARScene = (props: any) => {
                 const ext = pendingModelContext.localUri.split('.').pop()?.toUpperCase() || 'GLB';
                 return ext === 'GLTF' ? 'GLTF' : ext === 'OBJ' ? 'OBJ' : ext === 'VRX' ? 'VRX' : 'GLB';
               })()}
+              materials={isXRayMode ? ["xrayMaterial"] : []}
               position={[
                 pendingModelContext.model_transform?.modelOffset?.x || 0,
                 pendingModelContext.model_transform?.modelOffset?.y || 0,
@@ -480,19 +483,22 @@ const ARScene = (props: any) => {
         </ViroNode>
       )}
       
-      {/* Placed Objects */}
-      {placedObjects.map((obj: ARPlacedObject, index: number) => (
-        <ARNodeComponent 
-          key={obj.id} 
-          obj={obj} 
-          index={index} 
-          setPlacedObjects={setPlacedObjects} 
-          arSceneRef={arSceneRef}
-          selectedObjectId={selectedObjectId}
-          setSelectedObjectId={setSelectedObjectId}
-          isPointRotateMode={isPointRotateMode}
-        />
-      ))}
+      {/* Placed Objects - Wrapped in a persistent node to prevent Viro reconciliation bugs when ghost unmounts */}
+      <ViroNode position={[0,0,0]}>
+        {placedObjects.map((obj: ARPlacedObject, index: number) => (
+          <ARNodeComponent 
+            key={obj.id} 
+            obj={obj} 
+            index={index} 
+            setPlacedObjects={setPlacedObjects} 
+            arSceneRef={arSceneRef}
+            selectedObjectId={selectedObjectId}
+            setSelectedObjectId={setSelectedObjectId}
+            isPointRotateMode={isPointRotateMode}
+            isXRayMode={isXRayMode}
+          />
+        ))}
+      </ViroNode>
 
       {/* Point rotate line */}
       {isPointRotateMode && selectedObjectId && ghostPosition && (
@@ -549,6 +555,7 @@ export default function SandboxARScreen({ navigation }: any) {
   // Selection & UI state
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
   const [isPointRotateMode, setIsPointRotateMode] = useState(false);
+  const [isXRayMode, setIsXRayMode] = useState(false);
   const selectedObject = placedObjects.find(o => o.id === selectedObjectId);
 
   // Catalog Modal States
@@ -703,10 +710,11 @@ export default function SandboxARScreen({ navigation }: any) {
            onPlaceGhost: handlePlaceGhost,
            crystalUri,
            selectedObjectId, setSelectedObjectId,
-           isPointRotateMode, setIsPointRotateMode
+           isPointRotateMode, setIsPointRotateMode,
+           isXRayMode
         }}
         style={styles.viroContainer} 
-        occlusionMode="depthBased"
+        occlusionMode={isXRayMode ? undefined : "depthBased"}
       />
 
       {/* Crosshair removed — big 50cm reticle circle in AR scene is always visible */}
@@ -717,12 +725,16 @@ export default function SandboxARScreen({ navigation }: any) {
           <Text style={styles.backIcon}>←</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>Multi Models Viewer</Text>
-        {pendingModelContext && (
-          <View style={styles.ghostIndicator}>
-            <Text style={styles.ghostIndicatorText}>👻 {pendingModelContext.title}</Text>
-          </View>
-        )}
+        <TouchableOpacity onPress={() => setIsXRayMode(!isXRayMode)} style={[styles.backButton, isXRayMode && { backgroundColor: 'rgba(0,230,255,0.3)' }]}>
+          <Text style={{ fontSize: 18 }}>{isXRayMode ? '🩻' : '🧱'}</Text>
+        </TouchableOpacity>
       </View>
+      
+      {pendingModelContext && (
+        <View style={styles.ghostIndicator}>
+          <Text style={styles.ghostIndicatorText}>👻 {pendingModelContext.title}</Text>
+        </View>
+      )}
 
       {/* Right Side Vertical Tools for Selected Object */}
       {selectedObjectId && selectedObject && (

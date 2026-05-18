@@ -91,7 +91,7 @@ interface CatalogModel {
 }
 
 
-const ARNodeComponent = ({ obj, index, setPlacedObjects, arSceneRef, selectedObjectId, setSelectedObjectId, activeTransformMode, isXRayMode }: { obj: ARPlacedObject, index: number, setPlacedObjects: any, arSceneRef?: any, selectedObjectId?: string | null, setSelectedObjectId?: any, activeTransformMode?: 'move' | 'rotate' | null, isXRayMode?: boolean }) => {
+const ARNodeComponent = ({ obj, index, setPlacedObjects, arSceneRef, selectedObjectId, setSelectedObjectId, activeTransformMode, setActiveTransformMode, isXRayMode }: { obj: ARPlacedObject, index: number, setPlacedObjects: any, arSceneRef?: any, selectedObjectId?: string | null, setSelectedObjectId?: any, activeTransformMode?: 'move' | 'rotate' | null, setActiveTransformMode?: any, isXRayMode?: boolean }) => {
   const nodeRef = useRef<any>(null);
   const modelRef = useRef<any>(null);
   const currentScale = useRef<[number, number, number]>(obj.scale);
@@ -177,6 +177,7 @@ const ARNodeComponent = ({ obj, index, setPlacedObjects, arSceneRef, selectedObj
       onRotate={onRotate}
       onClick={() => {
         if (setSelectedObjectId) setSelectedObjectId(obj.id);
+        if (setActiveTransformMode) setActiveTransformMode('move');
       }}
     >
       <Viro3DObject
@@ -238,7 +239,7 @@ const ARScene = (props: any) => {
      onPlaceGhost,
      crystalUri,
      selectedObjectId, setSelectedObjectId,
-     activeTransformMode,
+     activeTransformMode, setActiveTransformMode,
      isXRayMode,
      isTapeMode,
      tapePoints, setTapePoints
@@ -503,6 +504,7 @@ const ARScene = (props: any) => {
           selectedObjectId={selectedObjectId}
           setSelectedObjectId={setSelectedObjectId}
           activeTransformMode={activeTransformMode}
+          setActiveTransformMode={setActiveTransformMode}
           isXRayMode={isXRayMode}
         />
       ))}
@@ -786,7 +788,7 @@ export default function SandboxARScreen({ navigation }: any) {
            onPlaceGhost: handlePlaceGhost,
            crystalUri,
            selectedObjectId, setSelectedObjectId,
-           activeTransformMode,
+           activeTransformMode, setActiveTransformMode,
            isXRayMode,
            isTapeMode,
            tapePoints, setTapePoints
@@ -971,7 +973,7 @@ export default function SandboxARScreen({ navigation }: any) {
                       activeOpacity={0.8}
                       onPress={() => {
                         setSelectedObjectId(item.id);
-                        setActiveTransformMode('rotate'); // Default to rotate
+                        setActiveTransformMode('move'); // Default to move
                         setIsObjectListOpen(false);
                       }}
                     >

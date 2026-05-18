@@ -748,8 +748,19 @@ export default function SandboxARScreen({ navigation }: any) {
 
     // Add to placed objects FIRST, then reset ghost
     setPlacedObjects(prev => {
-      const updated = [...prev, newObject];
-      return updated;
+      if (prev.filter(o => o.id !== 'dummy-bugfix').length === 0) {
+        // MACRO FIX: The very first object in Viro sometimes disappears due to a native initialization glitch.
+        // We place a hidden dummy object far underground first, and the real one after it.
+        const dummyObject = { ...newObject, id: 'dummy-bugfix', title: 'dummy-bugfix', position: [0, -100, 0] as [number, number, number] };
+        
+        // Remove dummy shortly after
+        setTimeout(() => {
+          setPlacedObjects(curr => curr.filter(o => o.id !== 'dummy-bugfix'));
+        }, 800);
+
+        return [...prev, dummyObject, newObject];
+      }
+      return [...prev, newObject];
     });
     // Reset ghost position so it follows camera again for next placement
     // Using setTimeout to ensure placedObjects state is committed first
@@ -935,11 +946,11 @@ export default function SandboxARScreen({ navigation }: any) {
       {isObjectListOpen && (
         <View style={[styles.objectListOverlay, { paddingTop: insets.top + 80 }]}>
           <Text style={styles.objectListTitle}>Placed Objects</Text>
-          {placedObjects.length === 0 ? (
+          {placedObjects.filter(o => o.id !== 'dummy-bugfix').length === 0 ? (
             <Text style={styles.hintText}>No objects placed yet</Text>
           ) : (
             <FlatList
-              data={placedObjects}
+              data={placedObjects.filter(o => o.id !== 'dummy-bugfix')}
               keyExtractor={(item) => item.id}
               contentContainerStyle={{ padding: spacing.md, gap: spacing.md }}
               renderItem={({ item, index }) => {
@@ -975,7 +986,13 @@ export default function SandboxARScreen({ navigation }: any) {
                         Alert.alert("Smazat objekt", "Opravdu chcete tento objekt smazat z prostoru?", [
                            { text: "Zrušit", style: "cancel" },
                            { text: "Smazat", style: "destructive", onPress: () => {
-                               setPlacedObjects((prev: ARPlacedObject[]) => prev.filter(o => o.id !== item.id));
+                               setPlacedObjects((prev: ARPlacedObject[]) => {
+                                  const next = prev.filter(o => o.id !== item.id);
+                                  if (next.filter(o => o.id !== 'dummy-bugfix').length === 0) {
+                                    setIsObjectListOpen(false); // Close list if empty
+                                  }
+                                  return next;
+                               });
                                if (selectedObjectId === item.id) {
                                   setSelectedObjectId(null);
                                }

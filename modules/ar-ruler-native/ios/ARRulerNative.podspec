@@ -19,6 +19,5 @@ Pod::Spec.new do |s|
   s.dependency 'GLTFSceneKit'
   s.dependency 'Euclid', '~> 0.8'
 
-  s.source_files = "**/*.{h,m,mm,swift,hpp,cpp}"
-  s.private_header_files = "**/*.hpp"
+  s.source_files = "**/*.{h,m,mm,swift,cpp}"
 end

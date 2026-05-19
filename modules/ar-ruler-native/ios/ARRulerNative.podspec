@@ -20,4 +20,5 @@ Pod::Spec.new do |s|
   s.dependency 'Euclid', '~> 0.8'
 
   s.source_files = "**/*.{h,m,mm,swift,hpp,cpp}"
+  s.private_header_files = "**/*.hpp"
 end

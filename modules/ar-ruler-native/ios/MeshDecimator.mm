@@ -1,5 +1,5 @@
 #import "MeshDecimator.h"
-#import "Simplify.h"
+#import "Simplify.hpp"
 #include <vector>
 
 @implementation MeshDecimator

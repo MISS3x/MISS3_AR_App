@@ -1916,8 +1916,8 @@ class ARRulerNativeView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
       let targetFaceCount = max(10, faceCount / 5)
       
       // Assuming MeshDecimator is available in the module umbrella header
-      guard let decimated = MeshDecimator.decimateMeshVertices(vData, faces: fData, targetCount: targetFaceCount),
-            let decVData = decimated["vertices"] as? Data,
+      let decimated = MeshDecimator.decimateMeshVertices(vData, faces: fData, targetCount: targetFaceCount)
+      guard let decVData = decimated["vertices"] as? Data,
             let decFData = decimated["faces"] as? Data else {
           continue
       }
